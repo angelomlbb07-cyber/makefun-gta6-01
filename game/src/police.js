@@ -1,6 +1,7 @@
 // The wanted level and the police who answer it: heat that rises with crimes and cools when
 // no officer can see the player, patrol cars that pathfind the road graph to the player and ram
-// them, foot cops who chase a player on foot and bust them, and roadblocks at three stars.
+// them, foot cops who chase a player on foot and bust them, roadblocks at three stars, and a
+// police helicopter with a searchlight that circles overhead at two stars and up.
 
 import { LANE, WANTED } from './config.js';
 import { angleLerp, angleTo, clamp, dist } from './random.js';
@@ -19,6 +20,7 @@ export function createPolice() {
     spawnTimer: 0,
     roadblockTimer: 0,
     pathTimer: 0,
+    heli: { active: false, x: 0, y: 0, angle: 0, orbit: 0 }, // police air unit, 2 stars and up
   };
 }
 
@@ -130,6 +132,13 @@ function stepCopCar(state, car, dt, rng) {
     car.pathTimer = 1.2;
     car.path = findPath(city, car.x, car.y, player.x, player.y);
     car.pathIndex = 0;
+    // Same guard as the screenshot autopilot: skip waypoints already behind the car,
+    // or a fast cop car U-turns toward the intersection it just passed instead of
+    // closing in on the player.
+    while (car.pathIndex < car.path.length - 1
+      && dist(car.x, car.y, car.path[car.pathIndex].x, car.path[car.pathIndex].y) < 40) {
+      car.pathIndex += 1;
+    }
   }
   const wp = car.path[Math.min(car.pathIndex, car.path.length - 1)];
   const dx = wp.x - car.x;
@@ -185,6 +194,26 @@ export function stepPolice(state, dt, rng) {
   const police = state.police;
   const { player } = state;
   updateStars(police);
+
+  // The helicopter: up at two stars, circling the player with its searchlight on them.
+  // It never lands and never shoots — it pins the player down so the cars can close in.
+  const heli = police.heli;
+  if (police.stars >= 2) {
+    if (!heli.active) {
+      heli.active = true;
+      heli.x = player.x - 260;
+      heli.y = player.y - 260;
+      heli.orbit = 0;
+    }
+    heli.orbit += dt * 0.55;
+    const tx = player.x + Math.cos(heli.orbit) * 190;
+    const ty = player.y + Math.sin(heli.orbit) * 190 - 60;
+    heli.x += (tx - heli.x) * Math.min(1, 1.4 * dt);
+    heli.y += (ty - heli.y) * Math.min(1, 1.4 * dt);
+    heli.angle = angleTo(heli.x, heli.y, player.x, player.y);
+  } else {
+    heli.active = false;
+  }
 
   // Heat cools when no officer is close enough to see the player.
   let seen = false;

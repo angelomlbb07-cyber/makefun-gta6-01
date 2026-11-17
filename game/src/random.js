@@ -49,3 +49,10 @@ export function dist(x1, y1, x2, y2) {
 export function angleTo(x1, y1, x2, y2) {
   return Math.atan2(y2 - y1, x2 - x1);
 }
+
+/** Wrap an angle to (-PI, PI]: the shortest turn between two headings. */
+export function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}

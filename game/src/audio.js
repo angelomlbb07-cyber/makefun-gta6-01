@@ -158,6 +158,16 @@ export function createAudio() {
       noise(0.12, 0.5, 500);
       tone(140, 0.1, 'square', 0.25, 70);
     },
+    /** Gunshot: a sharp noise crack with a low thump under it. */
+    shoot() {
+      noise(0.09, 0.65, 2400);
+      tone(180, 0.08, 'square', 0.22, 60);
+    },
+    /** Radio station change blip: two bright notes, like tuning a dial. */
+    radio() {
+      tone(880, 0.06, 'sine', 0.2);
+      setTimeout(() => tone(1174, 0.08, 'sine', 0.2), 70);
+    },
     crash() {
       noise(0.3, 0.7, 400);
       tone(90, 0.25, 'sawtooth', 0.3, 40);

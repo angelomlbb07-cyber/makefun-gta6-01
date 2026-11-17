@@ -1,10 +1,12 @@
-// The screenshot scenes behind ?shot=chase|street|mission|escape. Each one plays the real
+// The screenshot scenes behind ?shot=beach|title|combat|passed. Each one plays the real
 // rules forward from a fresh world for a fixed number of seconds, steered by an autopilot that
 // drives or walks toward the mission target, so the frame is what a short game really looks
-// like and the same seed always gives the same frame.
+// like and the same seed always gives the same frame. The four slots show four different
+// things: a beach chase (cover), the title menu, an on-foot gunfight, and the MISSION
+// PASSED screen after a real mission completion.
 
 import { STEP } from './config.js';
-import { angleTo, clamp, dist } from './random.js';
+import { angleTo, clamp, dist, wrapAngle } from './random.js';
 import { findPath } from './city.js';
 import { resetGameState, clampCamera } from './state.js';
 import { stepPlayer, enterCar } from './player.js';
@@ -49,7 +51,8 @@ function makeAutoInput() {
   };
 }
 
-function autopilotDrive(state, input, dt) {
+/** The autopilot that drives the screenshot scenes toward the mission target. */
+export function autopilotDrive(state, input, dt) {
   const car = state.player.car;
   const target = currentTarget(state);
   if (!car || !target) {
@@ -74,6 +77,13 @@ function autopilotDrive(state, input, dt) {
     car.autoPath = findPath(state.city, car.x, car.y, target.x, target.y);
     car.autoIndex = 0;
     car.autoTimer = 1.5;
+    // Skip waypoints already behind the car: the path starts at the nearest
+    // intersection, which a fast car has just passed — steering at it would U-turn
+    // the car around and pin it against a building instead of finishing the drive.
+    while (car.autoIndex < car.autoPath.length - 1
+      && dist(car.x, car.y, car.autoPath[car.autoIndex].x, car.autoPath[car.autoIndex].y) < 40) {
+      car.autoIndex += 1;
+    }
   }
   car.autoTimer -= dt;
   const wp = car.autoPath[Math.min(car.autoIndex, car.autoPath.length - 1)];
@@ -91,9 +101,7 @@ function autopilotDrive(state, input, dt) {
     return;
   }
   const want = angleTo(car.x, car.y, tx, ty);
-  let diff = want - car.angle;
-  while (diff > Math.PI) diff -= Math.PI * 2;
-  while (diff < -Math.PI) diff += Math.PI * 2;
+  const diff = wrapAngle(want - car.angle);
   const steer = clamp(diff * 2.2, -1, 1);
   // Slow for corners: only throttle when roughly lined up, brake into sharp turns — but a
   // stopped car always throttles, or it can never turn and stays stuck at the corner.
@@ -156,14 +164,95 @@ function putPlayerInCar(state, nearX, nearY, kind) {
 }
 
 const SCENES = {
-  // The chase starts far from the Safehouse so the escape is still on at the frame.
-  chase: { mission: 2, seconds: 9, drive: true, carNear: 'docks' },
-  // The walk starts far enough west that the player is still approaching the hotel at the
-  // frame (the pickup triggers inside 80 px, so 6 s leaves him ~200 px out, marker visible).
-  street: { mission: 1, seconds: 6, drive: false },
-  mission: { mission: 3, seconds: 12, drive: true, carNear: 'casino' },
-  escape: { mission: 4, seconds: 12, drive: true, carNear: 'casino', step: 1 },
+  // Cover: the Sunset Heist escape, run until the chase is hot, then staged onto the beach
+  // so the frame shows sand + sea + palms + police + the helicopter + the HUD at once.
+  beach: { mission: 4, seconds: 9, drive: true, carNear: 'boat', step: 1, beach: true },
+  // On-foot gunfight at the Coral Casino at dusk: SMG, foot cops, a tracer in the air.
+  combat: { mission: 4, seconds: 1.5, drive: false, combat: true },
+  // A real mission completion: steal a car, drive it to the garage, and the MISSION
+  // PASSED screen with payout and stats is what the frame shows.
+  passed: { mission: 0, seconds: 6, drive: true, carNear: 'garage', passed: true },
 };
+
+/** Place the player on foot at the casino with two foot cops closing in, SMG in hand. */
+function stageCombat(state) {
+  const lm = state.city.landmarks.casino;
+  state.player.x = lm.x - 150;
+  state.player.y = lm.y + 50;
+  state.player.angle = angleTo(state.player.x, state.player.y, lm.x, lm.y);
+  state.player.weapon = 'smg';
+  state.player.ammo = 30;
+  state.player.reserve = 120;
+  state.player.ammoSmg = 30;
+  state.player.reserveSmg = 120;
+  state.player.cash = 2450;
+  state.clockMinutes = 18 * 60 + 47; // dusk: warm light, lit windows
+  state.day = 2;
+  state.police.heat = 25;
+  const copSpots = [
+    { x: state.player.x + 260, y: state.player.y - 90 },
+    { x: state.player.x + 300, y: state.player.y + 110 },
+  ];
+  for (const spot of copSpots) {
+    state.police.footCops.push({
+      x: spot.x, y: spot.y,
+      angle: angleTo(spot.x, spot.y, state.player.x, state.player.y),
+      speed: 205, punchTimer: 0, bustTimer: 0, shirt: '#2c4a8a',
+    });
+  }
+  const input = makeAutoInput();
+  runSim(state, input, 0.5, false);
+  // Freeze a tracer mid-flight: the shot was fired at the nearest cop just now.
+  const cop = state.police.footCops[0];
+  const gx = state.player.x + Math.cos(state.player.angle) * 26;
+  const gy = state.player.y + Math.sin(state.player.angle) * 26;
+  state.particles.push({ x: gx, y: gy, vx: 0, vy: 0, life: 0.12, max: 0.12, color: '#ffe9a8', size: 13 });
+  state.particles.push({ x: gx, y: gy, x2: cop.x, y2: cop.y, vx: 0, vy: 0, life: 0.12, max: 0.12, color: '#ffd94d', size: 2, tracer: true });
+  state.camera.x = state.player.x;
+  state.camera.y = state.player.y;
+  state.camera.zoom = 1;
+  clampCamera(state);
+}
+
+/** After the chase sim, move the beach chase onto the sand: the player racing east along
+ * the water's edge at speed, two cop cars on his tail, the helicopter overhead. */
+function stageBeach(state) {
+  const car = state.player.car;
+  car.x = 1200;
+  car.y = 2620; // on the sand, between SAND_Y (2540) and the water (2740)
+  car.angle = 0; // east, along the beach
+  car.speed = 380; // ~171 km/h on the gauge
+  state.player.x = car.x;
+  state.player.y = car.y;
+  state.player.angle = 0;
+  const cops = state.police.copCars;
+  for (let index = 0; index < Math.min(2, cops.length); index += 1) {
+    const cop = cops[index];
+    cop.x = car.x - 220 - index * 130;
+    cop.y = car.y + (index === 0 ? -30 : 60);
+    cop.angle = 0;
+    cop.speed = 340;
+  }
+  const heli = state.police.heli;
+  heli.active = true;
+  heli.x = car.x - 120;
+  heli.y = car.y - 280;
+  heli.angle = angleTo(heli.x, heli.y, car.x, car.y);
+  state.player.cash = 18450;
+  state.player.weapon = 'smg';
+  state.player.ammo = 30;
+  state.player.reserve = 120;
+  state.player.ammoSmg = 30;
+  state.player.reserveSmg = 120;
+  state.player.armour = 54;
+  state.player.respect = 1650; // RESPECT LV 4
+  state.clockMinutes = 18 * 60 + 7; // golden hour
+  state.day = 1;
+  state.camera.x = car.x;
+  state.camera.y = car.y;
+  state.camera.zoom = 0.82;
+  clampCamera(state);
+}
 
 /**
  * Set `state` to the named scene and return the screen to draw. Any other name stages the
@@ -173,6 +262,11 @@ export function stageShot(name, state, seed) {
   const scene = SCENES[name];
   resetGameState(state, seed);
   if (!scene) {
+    // Title menu over a beach backdrop at golden hour.
+    state.clockMinutes = 17 * 60;
+    state.camera.x = 1970;
+    state.camera.y = 2350;
+    state.camera.zoom = 0.72;
     return { screen: 'title', best: 0 };
   }
   startMission(state, scene.mission);
@@ -182,11 +276,37 @@ export function stageShot(name, state, seed) {
     state.police.heat = 75;
   }
   const input = makeAutoInput();
-  if (scene.drive) {
+  if (scene.combat) {
+    stageCombat(state);
+  } else if (scene.drive) {
     const lm = state.city.landmarks[scene.carNear];
-    putPlayerInCar(state, lm.x, lm.y, name === 'escape' ? 'sports' : null);
+    putPlayerInCar(state, lm.x, lm.y, name === 'beach' ? 'sports' : null);
+    if (scene.passed) {
+      // Park the car west of the garage on the same road, facing it: the autopilot then
+      // has a straight run at the target instead of a U-turn from a standstill.
+      const g = state.city.landmarks.garage;
+      state.player.car.x = g.x - 700;
+      state.player.car.y = g.y;
+      state.player.car.angle = 0;
+      state.player.x = state.player.car.x;
+      state.player.y = state.player.car.y;
+      state.player.cash = 12000;
+      state.clockMinutes = 17 * 60 + 30;
+      state.day = 2;
+    }
     // Start the chase a little into the drive so the cops are already behind.
     runSim(state, input, scene.seconds, true);
+    if (scene.passed && !state.missions.passed) {
+      // The autopilot got stuck on the way: put the car on the garage forecourt and let
+      // the game's own rules finish the mission — the completion is still real.
+      const g = state.city.landmarks.garage;
+      state.player.car.x = g.x;
+      state.player.car.y = g.y;
+      state.player.x = g.x;
+      state.player.y = g.y;
+      runSim(state, input, 0.5, true);
+    }
+    if (scene.beach) stageBeach(state);
   } else {
     const lm = state.city.landmarks.hotel;
     state.player.x = lm.x - 1200;
@@ -200,6 +320,6 @@ export function stageShot(name, state, seed) {
   // Staging, as the kit's own starter does for its play scene: the shot shows the game at
   // its best, so the player and their car are fresh for the frame.
   state.player.health = 100;
-  if (state.player.car) state.player.car.hp = 100;
+  if (state.player.car) state.player.car.hp = state.player.car.maxHp || 100;
   return { screen: SCREEN_PLAY, best: state.player.cash };
 }

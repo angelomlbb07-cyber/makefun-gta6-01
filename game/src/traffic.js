@@ -2,7 +2,7 @@
 // walking the sidewalks who flee when trouble comes. Nothing here knows about missions or the
 // police; it only moves the city's ordinary life.
 
-import { CAR, LANE, ROAD_W, TRAFFIC } from './config.js';
+import { CAR, CAR_NAMES, LANE, ROAD_W, TRAFFIC } from './config.js';
 import { angleLerp, angleTo, clamp, dist } from './random.js';
 import { findPath, randomRoadPoint } from './city.js';
 
@@ -41,6 +41,8 @@ export function makeCar(city, rng, opts = {}) {
     parked: opts.parked ?? false,
     driver: opts.driver ?? false,
     hp: CAR.hp,
+    maxHp: CAR.hp, // garage armour raises this for the player's car
+    name: opts.name || rng.pick(CAR_NAMES[kind] || CAR_NAMES.sedan),
     path: null,
     pathIndex: 0,
     brake: false,

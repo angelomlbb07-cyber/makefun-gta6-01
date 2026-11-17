@@ -2,7 +2,7 @@
 // landmarks the missions use, and the road graph cars and police pathfind on.
 // Blocks are 260px, roads 90px, 11 columns x 7 rows. South of the last road is sand, then water.
 
-import { BLOCK_H, BLOCK_W, COLS, districtAt, PALETTE, ROAD_W, ROWS, STREET_NAMES_H, STREET_NAMES_V, WORLD } from './config.js';
+import { BLOCK_H, BLOCK_W, COLS, DISTRICT_FILL, districtAt, PALETTE, ROAD_W, ROWS, SIGNS, STREET_NAMES_H, STREET_NAMES_V, WORLD } from './config.js';
 import { clamp } from './random.js';
 
 export const WATER_Y = 2740; // south of here is the sea; nothing drives or walks in it
@@ -17,6 +17,7 @@ export function buildCity(rng) {
   const blocks = [];
   const buildings = [];
   const trees = [];
+  const props = []; // beach umbrellas, the lifeguard tower, the hotel pool: props that make a district read
   const parks = new Set(['2,2', '8,5', '4,6']);
   for (let col = 0; col < COLS; col += 1) {
     for (let row = 0; row < ROWS; row += 1) {
@@ -50,6 +51,9 @@ export function buildCity(rng) {
             height: downtown ? 3 : type === 'houses' ? 1 : rng.int(1, 2),
             color: type === 'docks' ? '#8a7a5e' : PALETTE.building[ci],
             roof: type === 'docks' ? '#6b5f49' : PALETTE.roof[ci],
+            // One in three buildings advertises: the sign is drawn on its roof.
+            sign: rng.chance(0.34) ? rng.pick(SIGNS) : null,
+            district,
           };
           block.buildings.push(building);
           buildings.push(building);
@@ -69,6 +73,15 @@ export function buildCity(rng) {
     trees.push({ x, y: rng.range(SAND_Y + 30, WATER_Y - 40), r: rng.range(11, 15), palm: true });
   }
 
+  // Beach props: umbrellas in a row along the sand, a lifeguard tower, and the hotel pool
+  // in the Beachfront block (col 8, row 6) so the cover shot reads as a beach at a glance.
+  const umbrellaColors = ['#e8452c', '#f2c230', '#3d7bd9', '#3d9e6a', '#e8903d'];
+  for (let x = 300; x < WORLD.width - 200; x += 260) {
+    props.push({ kind: 'umbrella', x: x + rng.range(-30, 30), y: SAND_Y + rng.range(45, 120), color: rng.pick(umbrellaColors) });
+  }
+  props.push({ kind: 'tower', x: 1970, y: SAND_Y + 90 });
+  props.push({ kind: 'pool', x: 8 * (BLOCK_W + ROAD_W) + ROAD_W + 40, y: 6 * (BLOCK_H + ROAD_W) + ROAD_W + 40, w: 180, h: 90 });
+
   // Landmarks: points on the road network the missions and the story use.
   const at = (i, j) => ({ x: vRoads[i], y: hRoads[j] });
   const landmarks = {
@@ -85,7 +98,7 @@ export function buildCity(rng) {
     spawn: { ...at(5, 6), name: 'Start', kind: 'spawn' },
   };
 
-  return { vRoads, hRoads, blocks, buildings, trees, landmarks, width: WORLD.width, height: WORLD.height };
+  return { vRoads, hRoads, blocks, buildings, trees, props, landmarks, width: WORLD.width, height: WORLD.height };
 }
 
 /** The intersection nearest a point, as {i, j, x, y}. */

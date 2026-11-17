@@ -1,5 +1,6 @@
 // Saving: the player's progress lives in localStorage, this browser only. A save holds cash,
-// the mission reached, where the player stands, the time of day and the best cash earned.
+// the mission reached, where the player stands, the time of day and the best cash earned,
+// plus the garage upgrades, the guns and the respect earned so far.
 
 import { SAVE_KEY } from './config.js';
 
@@ -12,6 +13,18 @@ export function saveGame(state) {
       y: Math.round(state.player.y),
       minutes: Math.floor(state.clockMinutes),
       best: Math.floor(state.best),
+      day: state.day,
+      respect: Math.floor(state.player.respect || 0),
+      armour: Math.floor(state.player.armour || 0),
+      weapon: state.player.weapon,
+      ammoPistol: state.player.ammoPistol,
+      reservePistol: state.player.reservePistol,
+      ammoSmg: state.player.ammoSmg,
+      reserveSmg: state.player.reserveSmg,
+      garage: {
+        engine: state.garage.engine, armour: state.garage.armour,
+        tyres: state.garage.tyres, nitro: state.garage.nitro,
+      },
       savedAt: Date.now(),
     };
     window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));

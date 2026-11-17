@@ -1,6 +1,7 @@
 // The whole game state in one object, built fresh from a seed: the city, its traffic, the
 // police, the missions, the player, and the camera. Both the live game and the screenshot
 // scenes build their world from here, so a scene is a real game, not a painting.
+// v2 adds the day counter, the radio, Benny's Garage upgrades and the score toasts.
 
 import { CLOCK } from './config.js';
 import { buildCity } from './city.js';
@@ -24,6 +25,11 @@ export function createGameState(seed) {
     events: {},
     time: 0,
     clockMinutes: CLOCK.startMinutes,
+    day: 1, // DAY 1, 2, 3: the clock wraps at midnight and the story spans three days
+    radio: { station: 0, track: 0, trackTimer: 0 },
+    garage: { open: false, selected: 0, engine: 0, armour: 0, tyres: 0, nitro: 0, nitroMeter: 100 },
+    scoreToast: '', // drift / near-miss bonus line, shown under the cash panel
+    scoreToastTimer: 0,
     best: 0,
     camera: { x: 0, y: 0, zoom: 0.85, shakeX: 0, shakeY: 0 },
     hint: '',

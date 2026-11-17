@@ -2,6 +2,8 @@
 // The city is a grid of blocks separated by roads: 11 columns x 8 rows of 260px blocks with
 // 90px roads between them, so the world is 3940 x 2890 px. The south edge is beach and water,
 // the east edge is the docks. Everything else is derived from these numbers.
+// v2: twelve story missions, guns, a police helicopter, Benny's Garage upgrades, a day
+// system, radio stations, respect and armour, drift and near-miss scoring.
 
 export const STEP = 1 / 60;
 export const VIEW = { width: 1280, height: 800 };
@@ -47,7 +49,21 @@ export const PALETTE = {
 
 export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
 
-// District names by block column/row, used by the HUD street readout and the minimap legend.
+// District ground tints so each part of the city reads differently at a glance: Downtown
+// cool grey-blue, Marina Bay teal, Coral Heights warm pink, Old Town ochre, Beachfront sand.
+export const DISTRICT_FILL = {
+  Downtown: '#c2a878', 'Marina Bay': '#cbb37e', 'Coral Heights': '#d3a184',
+  'Old Town': '#cfa96f', Beachfront: '#e0c184', 'The Docks': '#a89a7c', Northside: '#cdb27e',
+};
+export const DISTRICT_FLAVOUR = {
+  Downtown: 'GLASS, GOLD AND BAD DECISIONS', 'Marina Bay': 'YACHTS, MONEY AND TROUBLE',
+  'Coral Heights': 'PALMS, POOLS AND QUIET MONEY', 'Old Town': 'WHERE SOLMAR STARTED',
+  Beachfront: 'SUN, SAND AND FAST CARS', 'The Docks': 'CRATES, CRANES AND NO QUESTIONS',
+  Northside: 'THE QUIET END OF TOWN',
+};
+// Building signs, one per district flavour: the city advertises itself.
+export const SIGNS = ['MOTEL PALMERA', 'TACOS 24H', 'SURF SHOP', 'DONUTS', 'LIQUOR', 'VACANCY',
+  'PIER 9', 'CORAL CASINO', 'PALMERA HOTEL', "BENNY'S GARAGE", 'SEAFOOD', 'HOTEL SOL', 'BAR NEON', 'PAWN SHOP'];
 export function districtAt(col, row) {
   if (row >= 6) return 'Beachfront';
   if (col >= 10) return 'The Docks';
@@ -88,7 +104,7 @@ export const CAR = {
   maxReverse: 150,
   turnRate: 2.6,
   drag: 0.55,
-  handbrakeDrag: 2.6,
+  handbrakeDrag: 1.4, // strong enough to swing the tail out, light enough that a drift can hold speed
   radius: 16,
   hp: 100,
 };
@@ -117,10 +133,42 @@ export const WANTED = {
   bustSeconds: 1.5,
 };
 
-export const MISSION_REWARDS = [300, 600, 900, 1400, 4000];
+export const MISSION_REWARDS = [300, 600, 900, 1400, 4000, 1200, 1800, 2200, 5000, 2600, 3200, 6000];
 export const TAXI_FARE = [45, 150];
 export const BUST_FINE = 150;
 export const WASTED_FINE = 100;
+
+// Guns: name, magazine size, reserve ammo, damage, range, fire rate (seconds between shots).
+export const WEAPONS = {
+  pistol: { name: 'PISTOL', mag: 12, reserve: 72, damage: 34, range: 380, rate: 0.28 },
+  smg: { name: 'HORNET SMG', mag: 30, reserve: 120, damage: 22, range: 460, rate: 0.09 },
+};
+// Radio stations and their tracks, cycled while driving.
+export const RADIO = [
+  { name: 'SOL FM 96.4', tracks: ['Sunset Drive', 'Palmera Nights', 'Golden Hour'] },
+  { name: 'CORAL 88.1', tracks: ['Tide Runner', 'Neon Palms', 'Boardwalk Lights'] },
+  { name: 'NEON TIDE 99.1', tracks: ['Midnight Ferry', 'Heat Wave', 'Coastline'] },
+  { name: 'BRISA 88.0', tracks: ['Sea Breeze', 'Old Town Rumba', 'Marina Waltz'] },
+];
+// Benny's Garage: upgrade name, price per level, max level. Engine raises speed, armour adds
+// car HP, tyres sharpen steering, nitro unlocks a Shift boost.
+export const GARAGE_UPGRADES = [
+  { key: 'engine', name: 'Turbo Engine', prices: [800, 1500, 2500], desc: '+12% top speed per level' },
+  { key: 'armour', name: 'Armour Plating', prices: [600, 1100, 1800], desc: '+40 car HP per level' },
+  { key: 'tyres', name: 'Racing Tyres', prices: [500, 900, 1400], desc: 'Sharper steering, better grip' },
+  { key: 'nitro', name: 'Nitro Kit', prices: [1200], desc: 'Hold Shift for a nitro boost' },
+];
+// Car names by kind, shown in the speedometer gauge.
+export const CAR_NAMES = {
+  sedan: ['Azul GT Coupe', 'Solmar Sedan', 'Coral Cruiser'],
+  taxi: ['City Taxi'], van: ['Harbor Van'], sports: ['Sunset GT', 'Veloce RS', 'Hornet S'],
+  truck: ['Dock Hauler'], police: ['PD Interceptor'],
+};
+// Drift and near-miss scoring: cash paid for stylish driving. Speeds here are px/s
+// (430 px/s is the top speed, ~193 km/h): a handbrake drift holds ~300 px/s with the
+// throttle down, so the drift floor sits at 180, not 200.
+export const DRIFT = { minSpeed: 180, minTime: 0.4, cashPerSecond: 50 };
+export const NEAR_MISS = { minSpeed: 250, minDist: 34, maxDist: 52, cash: 150, cooldown: 3 };
 
 // Game clock: 1 game minute per 2 real seconds, starting at golden afternoon.
 export const CLOCK = { startMinutes: 16 * 60 + 20, minutesPerSecond: 0.5 };

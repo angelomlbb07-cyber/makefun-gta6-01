@@ -1,18 +1,34 @@
 // Drawing only: the city, its cars and people, the HUD with its minimap, and the menus.
 // The canvas fills the window; the game draws in a 1280x800 logical view and the camera
-// follows the player through the world. Nothing here changes the game state.
+// follows the player through the world. Nothing here changes the game state. v2 adds sunset
+// and night lighting, lit windows, headlight and searchlight cones, district tints, building
+// signs, beach props, a circular speedometer, weapon and radio HUD, and the mission-passed
+// and garage screens.
 
-import { PALETTE, VIEW, FONT } from './config.js';
+import { BLOCK_H, BLOCK_W, COLS, DISTRICT_FILL, DISTRICT_FLAVOUR, districtAt, GARAGE_UPGRADES, PALETTE, RADIO, ROAD_W, ROWS, VIEW, FONT, WEAPONS } from './config.js';
 import { clamp, dist } from './random.js';
-import { currentObjective, currentTarget } from './missions.js';
-import { SAND_Y, WATER_Y as SEA_Y } from './city.js';
+import { currentMission, currentObjective, currentTarget, MISSIONS } from './missions.js';
+import { SAND_Y, WATER_Y as SEA_Y, blockAt, roadAt } from './city.js';
+import { respectLevel } from './player.js';
 
 export const SCREEN_TITLE = 'title';
 export const SCREEN_PLAY = 'play';
 export const SCREEN_PAUSED = 'paused';
 export const SCREEN_OVER = 'over';
 
-const MINIMAP = { x: 1092, y: 16, w: 172, h: 126 };
+// Bigger than v1 (172x126): the minimap must survive the contact-sheet shrink, and its
+// SOLMAR label now sits INSIDE the box so it can never clip off the right edge.
+const MINIMAP = { x: 1064, y: 16, w: 200, h: 146 };
+
+/** Time-of-day light: warm sunset glow and night dark, from the game clock. */
+export function lightLevel(state) {
+  const m = state.clockMinutes % 1440;
+  if (m < 360) return { warm: 0, dark: 0.5 };
+  if (m < 480) return { warm: 0.25, dark: 0.25 };
+  if (m < 960) return { warm: 0, dark: 0 };
+  if (m < 1140) return { warm: ((m - 960) / 180) * 0.5, dark: ((m - 960) / 180) * 0.25 };
+  return { warm: 0.12, dark: 0.5 };
+}
 
 export function createRenderer(canvas) {
   const ctx = canvas.getContext('2d');
@@ -86,6 +102,13 @@ export function createRenderer(canvas) {
     ctx.fillRect(-8, -26, 16, 16);
     ctx.restore();
 
+    // District ground tints: each district gets its own wash so Downtown, Marina Bay,
+    // Coral Heights, Old Town, the Docks and Beachfront read differently at a glance.
+    for (const block of city.blocks) {
+      ctx.fillStyle = DISTRICT_FILL[block.district] || PALETTE.ground;
+      ctx.fillRect(block.x, block.y, block.w, block.h);
+    }
+
     // Parks.
     for (const block of city.blocks) {
       if (block.type !== 'park') continue;
@@ -134,7 +157,8 @@ export function createRenderer(canvas) {
       }
     }
 
-    // Buildings with long afternoon shadows.
+    // Buildings with long afternoon shadows, roof signs, and lit windows after dark.
+    const light = lightLevel(state);
     for (const b of city.buildings) {
       const sh = 8 + b.height * 4;
       ctx.fillStyle = 'rgba(20, 14, 8, 0.22)';
@@ -149,6 +173,21 @@ export function createRenderer(canvas) {
         ctx.fillStyle = 'rgba(0,0,0,0.18)';
         ctx.fillRect(b.x + 12, b.y + 12, 18, 12);
         ctx.fillRect(b.x + b.w - 30, b.y + b.h - 24, 18, 12);
+      }
+      // Lit windows at dusk and night: a few warm squares per building, picked by position.
+      if (light.dark > 0.15) {
+        ctx.fillStyle = 'rgba(255, 214, 120, 0.9)';
+        if ((b.x * 7 + b.y * 13) % 3 !== 0) ctx.fillRect(b.x + 10, b.y + 10, 12, 9);
+        if ((b.x * 5 + b.y * 11) % 4 !== 0) ctx.fillRect(b.x + b.w - 26, b.y + b.h - 24, 12, 9);
+      }
+      // Roof sign: the building advertises itself (MOTEL PALMERA, TACOS 24H, ...).
+      if (b.sign && b.w >= 70) {
+        ctx.font = font(10, true);
+        ctx.textAlign = 'center';
+        ctx.fillStyle = 'rgba(20, 14, 8, 0.55)';
+        ctx.fillText(b.sign, b.x + b.w / 2 + 1, b.y + b.h / 2 + 4);
+        ctx.fillStyle = '#fff3d0';
+        ctx.fillText(b.sign, b.x + b.w / 2, b.y + b.h / 2 + 3);
       }
     }
     // Trees, palms, dock containers.
@@ -175,6 +214,40 @@ export function createRenderer(canvas) {
       ctx.beginPath();
       ctx.arc(t.x - 3, t.y - 3, t.r * 0.6, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    // Beach props: umbrellas, the lifeguard tower, and the hotel pool.
+    for (const prop of city.props || []) {
+      if (prop.kind === 'umbrella') {
+        ctx.fillStyle = '#8a6a45';
+        ctx.fillRect(prop.x - 1, prop.y - 2, 2, 14);
+        ctx.fillStyle = prop.color;
+        ctx.beginPath();
+        ctx.arc(prop.x, prop.y - 2, 13, Math.PI, 0);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.beginPath();
+        ctx.arc(prop.x, prop.y - 2, 13, Math.PI * 1.25, Math.PI * 1.6);
+        ctx.fill();
+      } else if (prop.kind === 'tower') {
+        ctx.strokeStyle = '#f5efe2';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(prop.x - 12, prop.y + 18);
+        ctx.lineTo(prop.x - 6, prop.y - 8);
+        ctx.moveTo(prop.x + 12, prop.y + 18);
+        ctx.lineTo(prop.x + 6, prop.y - 8);
+        ctx.stroke();
+        ctx.fillStyle = '#e8452c';
+        ctx.fillRect(prop.x - 16, prop.y - 20, 32, 14);
+        ctx.fillStyle = '#f5efe2';
+        ctx.fillRect(prop.x - 16, prop.y - 20, 32, 4);
+      } else if (prop.kind === 'pool') {
+        ctx.fillStyle = '#2f9db8';
+        ctx.fillRect(prop.x, prop.y, prop.w, prop.h);
+        ctx.fillStyle = '#7fd4e8';
+        ctx.fillRect(prop.x + 8, prop.y + 8, prop.w - 16, prop.h - 16);
+      }
     }
 
     // Mission target beacon.
@@ -204,6 +277,19 @@ export function createRenderer(canvas) {
 
     // Cars.
     for (const car of traffic.cars) drawCar(state, car);
+    // Headlight cones after dark: the player's car and every police car throw light ahead.
+    if (lightLevel(state).dark > 0.15) {
+      const cone = (x, y, angle) => {
+        ctx.fillStyle = 'rgba(255, 233, 168, 0.13)';
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.arc(x + Math.cos(angle) * 230, y + Math.sin(angle) * 230, 46, angle - 0.24, angle + 0.24);
+        ctx.closePath();
+        ctx.fill();
+      };
+      if (player.car) cone(player.car.x, player.car.y, player.car.angle);
+      for (const cop of police.copCars) cone(cop.x, cop.y, cop.angle);
+    }
     // Pedestrians.
     for (const ped of traffic.peds) drawPed(state, ped);
     // Foot cops.
@@ -213,13 +299,57 @@ export function createRenderer(canvas) {
     else if (player.car) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.14)';
       ctx.beginPath();
-      ctx.arc(player.car.x, player.car.y, 42, 0, Math.PI * 2);
+      ctx.arc(player.car.x, player.car.y, 50, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 4;
+      ctx.lineWidth = 5;
       ctx.beginPath();
-      ctx.arc(player.car.x, player.car.y, 34, 0, Math.PI * 2);
+      ctx.arc(player.car.x, player.car.y, 42, 0, Math.PI * 2);
       ctx.stroke();
+    }
+    // Police helicopter: searchlight cone on the player, rotor spinning, shadow below.
+    if (police.heli && police.heli.active) {
+      const heli = police.heli;
+      ctx.fillStyle = 'rgba(20, 14, 8, 0.25)';
+      ctx.beginPath();
+      ctx.ellipse(player.x, player.y, 34, 16, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 233, 168, 0.16)';
+      ctx.beginPath();
+      ctx.moveTo(heli.x, heli.y);
+      ctx.lineTo(player.x - 42, player.y - 30);
+      ctx.lineTo(player.x + 42, player.y + 30);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 233, 168, 0.28)';
+      ctx.beginPath();
+      ctx.arc(player.x, player.y, 46, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.save();
+      ctx.translate(heli.x, heli.y);
+      ctx.rotate(heli.angle);
+      ctx.fillStyle = '#1f3a6e';
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 26, 12, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#2c4a8a';
+      ctx.fillRect(-34, -3, 16, 6);
+      ctx.fillStyle = '#9fd4e8';
+      ctx.beginPath();
+      ctx.arc(12, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(245, 239, 226, 0.8)';
+      ctx.lineWidth = 3;
+      const rotor = state.time * 22;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(rotor) * 34, Math.sin(rotor) * 34);
+      ctx.lineTo(-Math.cos(rotor) * 34, -Math.sin(rotor) * 34);
+      ctx.stroke();
+      ctx.restore();
+      ctx.font = font(11, true);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f5efe2';
+      ctx.fillText('SOLMAR PD AIR 1', heli.x, heli.y - 34);
     }
     // Punch burst.
     if (player.onFoot && player.punchTimer > 0.28) {
@@ -235,13 +365,28 @@ export function createRenderer(canvas) {
       ctx.arc(px, py, 18, 0, Math.PI * 2);
       ctx.stroke();
     }
-    // Particles.
+    // Particles: tracers are lines, everything else is a fading dot.
     for (const p of particles) {
       ctx.globalAlpha = clamp(p.life / p.max, 0, 1);
-      ctx.fillStyle = p.color;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.tracer) {
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x2, p.y2);
+        ctx.stroke();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(p.x2, p.y2);
+        ctx.stroke();
+      } else {
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.globalAlpha = 1;
   }
@@ -358,20 +503,38 @@ export function createRenderer(canvas) {
     if (player.invulnerable > 0 && Math.floor(player.invulnerable * 10) % 2 === 0) ctx.globalAlpha = 0.4;
     ctx.fillStyle = 'rgba(20, 14, 8, 0.3)';
     ctx.beginPath();
-    ctx.ellipse(0, 5, 11, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 6, 14, 6, 0, 0, Math.PI * 2);
     ctx.fill();
+    // White ring so Marco reads at contact-sheet size, not as a red dot.
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(0, 0, 17, 0, Math.PI * 2);
+    ctx.stroke();
     ctx.fillStyle = '#e8452c';
     ctx.beginPath();
-    ctx.arc(0, bob * 0.4, 10, 0, Math.PI * 2);
+    ctx.arc(0, bob * 0.4, 13, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#f2f2f2';
     ctx.beginPath();
-    ctx.arc(Math.cos(player.angle) * 4, Math.sin(player.angle) * 4 - 2, 5, 0, Math.PI * 2);
+    ctx.arc(Math.cos(player.angle) * 5, Math.sin(player.angle) * 5 - 2, 6, 0, Math.PI * 2);
     ctx.fill();
     ctx.fillStyle = '#241f1a';
-    ctx.fillRect(Math.cos(player.angle) * 8 - 2, Math.sin(player.angle) * 8 - 2, 4, 4);
+    ctx.fillRect(Math.cos(player.angle) * 10 - 2, Math.sin(player.angle) * 10 - 2, 4, 4);
+    // The gun in his hand, when he is carrying one.
+    if (player.ammo > 0 || player.weapon) {
+      ctx.fillStyle = '#1c1a18';
+      ctx.fillRect(Math.cos(player.angle) * 16 - 3, Math.sin(player.angle) * 16 - 2, 9, 4);
+    }
     ctx.restore();
     ctx.globalAlpha = 1;
+    // Name label above the player, readable even when shrunk.
+    ctx.font = font(12, true);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(20, 14, 8, 0.7)';
+    ctx.fillText('MARCO', player.x + 1, player.y - 26);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText('MARCO', player.x, player.y - 27);
   }
 
   function drawMinimap(state) {
@@ -424,9 +587,9 @@ export function createRenderer(canvas) {
     ctx.translate(MINIMAP.x + player.x * sx, MINIMAP.y + player.y * sy);
     ctx.rotate(player.angle);
     ctx.beginPath();
-    ctx.moveTo(6, 0);
-    ctx.lineTo(-4, -4);
-    ctx.lineTo(-4, 4);
+    ctx.moveTo(9, 0);
+    ctx.lineTo(-6, -6);
+    ctx.lineTo(-6, 6);
     ctx.closePath();
     ctx.fill();
     ctx.restore();
@@ -434,37 +597,84 @@ export function createRenderer(canvas) {
     ctx.strokeStyle = 'rgba(245, 239, 226, 0.6)';
     ctx.lineWidth = 1;
     ctx.strokeRect(MINIMAP.x - 6, MINIMAP.y - 6, MINIMAP.w + 12, MINIMAP.h + 12);
-    text('SOLMAR', MINIMAP.x + MINIMAP.w / 2, MINIMAP.y + MINIMAP.h + 22, 13, PALETTE.muted, 'center', true);
+    // The label sits INSIDE the minimap box now, so it can never clip off the edge.
+    ctx.fillStyle = 'rgba(24, 20, 16, 0.65)';
+    ctx.fillRect(MINIMAP.x, MINIMAP.y + MINIMAP.h - 18, MINIMAP.w, 18);
+    text('SOLMAR', MINIMAP.x + MINIMAP.w / 2, MINIMAP.y + MINIMAP.h - 5, 12, '#f5efe2', 'center', true);
   }
 
   function drawHud(state) {
     const { player, police } = state;
-    // Top-left: cash, stars, health.
+    // Top-left: cash, stars, health, armour, respect — one panel, room to breathe.
     ctx.fillStyle = PALETTE.panel;
-    roundRect(14, 14, 250, 92, 10);
+    roundRect(14, 14, 300, 122, 10);
     ctx.fill();
     text(`$${Math.floor(player.cash).toLocaleString('en-US')}`, 28, 48, 30, PALETTE.gold, 'left', true);
     let stars = '';
     for (let s = 0; s < 3; s += 1) stars += s < police.stars ? '★' : '☆';
     text(stars, 28, 82, 24, police.stars > 0 ? '#ff5a4d' : PALETTE.muted, 'left', true);
+    text('HP', 150, 60, 11, PALETTE.muted, 'left', true);
     ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    roundRect(150, 66, 100, 12, 6);
+    roundRect(150, 66, 150, 12, 6);
     ctx.fill();
     ctx.fillStyle = player.health > 40 ? '#58b368' : '#e8452c';
-    roundRect(150, 66, Math.max(0, 100 * player.health / 100), 12, 6);
+    roundRect(150, 66, Math.max(0, 150 * player.health / 100), 12, 6);
     ctx.fill();
-    text('HP', 150, 60, 11, PALETTE.muted, 'left', true);
+    text('ARMOUR', 28, 104, 11, PALETTE.muted, 'left', true);
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    roundRect(110, 92, 90, 12, 6);
+    ctx.fill();
+    ctx.fillStyle = '#7fb8d9';
+    roundRect(110, 92, Math.max(0, 90 * (player.armour || 0) / 100), 12, 6);
+    ctx.fill();
+    text(`RESPECT LV ${respectLevel(player)}`, 214, 104, 12, PALETTE.gold, 'left', true);
 
-    // Clock + street.
+    // Mission timer + drift / near-miss bonus, under the cash panel.
+    if (state.missions.timer > 0 && currentMission(state)) {
+      const t = Math.ceil(state.missions.timer);
+      text(`⏱ ${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`, 28, 162, 18, PALETTE.gold, 'left', true);
+    }
+    if (state.scoreToastTimer > 0 && state.scoreToast) {
+      text(state.scoreToast, 28, 190, 18, '#ffd94d', 'left', true);
+    }
+
+    // Clock + street + district in their own measured pill: the text is sized to the pill,
+    // never the pill to the text, so nothing can clip ("olmar" in v1).
     const minutes = Math.floor(state.clockMinutes) % (24 * 60);
     const hh = Math.floor(minutes / 60);
     const mm = minutes % 60;
-    const clock = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    const clock = `DAY ${state.day} · ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    // Street + district are derived live from where the player stands, so the pill is
+    // right even in staged scenes (which never run the live updateStreet step): on the
+    // sand it is Ocean Front · Beachfront, on a road the road's name, else the block.
+    const onSand = player.y > SAND_Y;
+    const road = roadAt(state.city, player.x, player.y);
+    const col = clamp(Math.floor((player.x - ROAD_W) / (BLOCK_W + ROAD_W)), 0, COLS - 1);
+    const row = clamp(Math.floor((player.y - ROAD_W) / (BLOCK_H + ROAD_W)), 0, ROWS - 1);
+    const district = onSand ? 'Beachfront' : districtAt(col, row);
+    // Off the road there is no street name: show the district once, not twice.
+    const streetLine = onSand ? 'Ocean Front · Beachfront'
+      : road ? `${road.name} · ${district}` : district;
+    ctx.font = font(24, true);
+    const cw = ctx.measureText(clock).width;
+    ctx.font = font(14, false);
+    const sw = ctx.measureText(streetLine).width;
+    const pillW = Math.max(cw, sw) + 48;
+    ctx.fillStyle = PALETTE.panel;
+    roundRect((VIEW.width - pillW) / 2, 10, pillW, 66, 10);
+    ctx.fill();
     text(clock, VIEW.width / 2, 40, 24, PALETTE.text, 'center', true);
-    const street = state.streetName || 'Solmar';
-    text(street, VIEW.width / 2, 62, 14, PALETTE.muted, 'center');
+    text(streetLine, VIEW.width / 2, 64, 14, PALETTE.muted, 'center');
 
     drawMinimap(state);
+
+    // District name + flavour line under the minimap, right-aligned inside the frame.
+    text(district.toUpperCase(), VIEW.width - 16, MINIMAP.y + MINIMAP.h + 26, 14, PALETTE.text, 'right', true);
+    text(DISTRICT_FLAVOUR[district] || '', VIEW.width - 16, MINIMAP.y + MINIMAP.h + 44, 11, PALETTE.muted, 'right');
+
+    // Radio: station + track, under the district line.
+    const station = RADIO[state.radio.station % RADIO.length];
+    text(`♪ ${station.name} — ${station.tracks[state.radio.track % station.tracks.length]}`, VIEW.width - 16, MINIMAP.y + MINIMAP.h + 66, 12, PALETTE.gold, 'right');
 
     // Objective banner.
     ctx.fillStyle = PALETTE.panel;
@@ -476,7 +686,8 @@ export function createRenderer(canvas) {
     text(obj, VIEW.width / 2, VIEW.height - 58, 17, PALETTE.text, 'center', true);
 
     // Toast (briefing / reward), wrapped to two lines so it never runs under the minimap.
-    if (state.missions.toastTimer > 0 && state.missions.toast) {
+    // Hidden while the MISSION PASSED panel is up: the two would stack on each other.
+    if (state.missions.toastTimer > 0 && state.missions.toast && state.missions.passedTimer <= 0) {
       ctx.font = font(18, false);
       const words = state.missions.toast.split(' ');
       const lines = [''];
@@ -511,16 +722,52 @@ export function createRenderer(canvas) {
     const hint = state.hint || '';
     if (hint) text(hint, 24, VIEW.height - 24, 15, PALETTE.muted, 'left');
 
-    // Speed + car health.
+    // Weapon + ammo, bottom-left above the hint.
+    const w = WEAPONS[player.weapon];
+    text(`${w.name}  ${player.ammo}/${player.reserve}`, 24, VIEW.height - 52, 19, PALETTE.gold, 'left', true);
+    text('Q switch · R reload · F fire', 24, VIEW.height - 76, 12, PALETTE.muted, 'left');
+
+    // Circular speedometer, bottom-right: gauge arc, big speed, car name, nitro bar.
     if (!player.onFoot && player.car) {
-      const kmh = Math.round(Math.abs(player.car.speed) * 0.45);
-      text(`${kmh} km/h`, VIEW.width - 24, VIEW.height - 24, 26, PALETTE.text, 'right', true);
-      if (player.car.hp < 100) {
+      const car = player.car;
+      const topSpeed = 430 * (1 + 0.12 * (state.garage ? state.garage.engine : 0));
+      const frac = clamp(Math.abs(car.speed) / topSpeed, 0, 1);
+      const kmh = Math.round(Math.abs(car.speed) * 0.45);
+      const gx = VIEW.width - 92;
+      const gy = VIEW.height - 96;
+      text(car.name || 'Car', VIEW.width - 24, gy - 78, 15, PALETTE.text, 'right', true);
+      ctx.fillStyle = PALETTE.panel;
+      ctx.beginPath();
+      ctx.arc(gx, gy, 62, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(gx, gy, 52, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.strokeStyle = PALETTE.gold;
+      ctx.lineWidth = 8;
+      ctx.beginPath();
+      ctx.arc(gx, gy, 52, -Math.PI / 2, -Math.PI / 2 + frac * Math.PI * 2);
+      ctx.stroke();
+      text(String(kmh), gx, gy + 8, 30, PALETTE.text, 'center', true);
+      text('km/h', gx, gy + 30, 12, PALETTE.muted, 'center');
+      if (state.garage && state.garage.nitro > 0) {
+        text('NITRO', gx, gy + 78, 11, '#ff9a2c', 'center', true);
         ctx.fillStyle = 'rgba(255,255,255,0.2)';
-        roundRect(VIEW.width - 174, VIEW.height - 58, 150, 10, 5);
+        roundRect(gx - 40, gy + 84, 80, 8, 4);
         ctx.fill();
-        ctx.fillStyle = player.car.hp > 40 ? '#58b368' : '#e8452c';
-        roundRect(VIEW.width - 174, VIEW.height - 58, 150 * player.car.hp / 100, 10, 5);
+        ctx.fillStyle = '#ff9a2c';
+        roundRect(gx - 40, gy + 84, 80 * (state.garage.nitroMeter / 100), 8, 4);
+        ctx.fill();
+      }
+      const maxHp = car.maxHp || 100;
+      if (car.hp < maxHp) {
+        ctx.fillStyle = 'rgba(255,255,255,0.2)';
+        roundRect(gx - 62, gy - 96, 124, 10, 5);
+        ctx.fill();
+        ctx.fillStyle = car.hp > 40 ? '#58b368' : '#e8452c';
+        roundRect(gx - 62, gy - 96, 124 * car.hp / maxHp, 10, 5);
         ctx.fill();
       }
     }
@@ -560,6 +807,19 @@ export function createRenderer(canvas) {
     }
   }
 
+  /** Sunset glow and night dark over the world (screen space, under the HUD). */
+  function drawLightTint(state) {
+    const light = lightLevel(state);
+    if (light.warm > 0) {
+      ctx.fillStyle = `rgba(255, 140, 40, ${light.warm * 0.22})`;
+      ctx.fillRect(0, 0, VIEW.width, VIEW.height);
+    }
+    if (light.dark > 0) {
+      ctx.fillStyle = `rgba(8, 10, 40, ${light.dark * 0.5})`;
+      ctx.fillRect(0, 0, VIEW.width, VIEW.height);
+    }
+  }
+
   function drawPanel(title, lines, prompt, accent) {
     const height = 150 + lines.length * 32 + 64;
     const x = (VIEW.width - 620) / 2;
@@ -584,7 +844,8 @@ export function createRenderer(canvas) {
     const items = ui.menuItems;
     const lines = [
       'An open-world crime story — drive, steal, escape.',
-      'Five story missions. Traffic, police, wanted levels, saves.',
+      'Twelve story missions over 3 days. Traffic, police, a helicopter,',
+      'guns, garage upgrades, radio and saves — one sun-soaked city.',
       '',
     ];
     const height = 150 + lines.length * 32 + 64 + items.length * 40;
@@ -612,37 +873,79 @@ export function createRenderer(canvas) {
       text(`${selected ? '▶ ' : ''}${items[index]}`, VIEW.width / 2, iy, 22, selected ? PALETTE.gold : PALETTE.text, 'center', selected);
     }
     const fy = y + 168 + items.length * 40 + 8;
-    text('WASD drive & walk · E enter car · F punch · Shift run · Space handbrake', VIEW.width / 2, fy + 18, 15, PALETTE.muted, 'center');
+    text('WASD drive & walk · E enter car · F fire · Q switch gun · Shift run · Space handbrake', VIEW.width / 2, fy + 18, 15, PALETTE.muted, 'center');
     text('An original game: its own city, names and story.', VIEW.width / 2, fy + 44, 15, PALETTE.muted, 'center');
     text('Enter or click to choose · ↑ ↓ to move', VIEW.width / 2, y + height - 24, 16, PALETTE.gold, 'center');
   }
 
   function drawHowTo() {
     drawPanel('How to play', [
-      'WASD / arrows — walk and drive · Shift — run',
+      'WASD / arrows — walk and drive · Shift — run / nitro (with the kit)',
       'E — get in / out of a car, hold E to crack the vault',
-      'F or click — punch · Space — handbrake',
+      'F or click — fire the gun (punch when the magazine is empty)',
+      'Q — switch pistol / SMG · R — reload · C — change radio station',
+      'G — open Benny\'s Garage at the garage (upgrades cost cash)',
       'P / Esc — pause · M — sound on / off',
       'Follow the yellow marker. Lose the cops at the Safehouse.',
+      'Drift with the handbrake and thread traffic for bonus cash.',
       'Progress saves after every mission.',
     ], 'Press Enter or click to go back', PALETTE.gold);
   }
 
   function drawMissions(state) {
     const lines = [];
-    for (let index = 0; index < 5; index += 1) {
+    for (let index = 0; index < MISSIONS.length; index += 1) {
       const done = index < state.missions.index || state.missions.finished;
       const current = index === state.missions.index && !state.missions.finished;
-      lines.push(`${done ? '✓' : current ? '▶' : '·'} Mission ${index + 1} — ${['First Wheels', 'The Pickup', 'Getaway Driver', 'The Dock Job', 'Sunset Heist'][index]}`);
+      lines.push(`${done ? '✓' : current ? '▶' : '·'} Mission ${index + 1} — ${MISSIONS[index].title}`);
     }
     lines.push('');
-    lines.push(`Cash earned so far: $${Math.floor(state.player.cash)}`);
+    lines.push(`Cash earned so far: $${Math.floor(state.player.cash)} · Day ${state.day} · Respect LV ${respectLevel(state.player)}`);
     drawPanel('Missions', lines, 'Press Enter or click to go back', PALETTE.gold);
+  }
+
+  /** MISSION PASSED: payout, time, accuracy, cars destroyed/stolen, star rating. */
+  function drawPassed(state) {
+    const p = state.missions.passed;
+    if (!p) return;
+    const stars = '★'.repeat(p.rating) + '☆'.repeat(4 - p.rating);
+    const mm = Math.floor(p.time / 60);
+    const ss = String(p.time % 60).padStart(2, '0');
+    const lines = [
+      `${p.title} — Mission ${p.index + 1} of ${MISSIONS.length}`,
+      '',
+      `PAYOUT  +$${p.payout.toLocaleString('en-US')}`,
+      `TIME  ${mm}:${ss}   ·   ACCURACY  ${p.accuracy}%`,
+      `CARS DESTROYED  ${p.carsDestroyed}   ·   CARS STOLEN  ${p.carsStolen}`,
+      `MAX WANTED  ${'★'.repeat(p.maxWanted)}${'☆'.repeat(3 - p.maxWanted)}`,
+      '',
+      stars,
+    ];
+    drawPanel('MISSION PASSED', lines, 'The city is yours, Marco — keep driving', PALETTE.gold);
+  }
+
+  /** Benny's Garage: buy upgrades with cash; they change the car you drive. */
+  function drawGarage(state) {
+    const g = state.garage;
+    const lines = [`Cash $${Math.floor(state.player.cash)} — upgrades stay on your car`, ''];
+    for (let index = 0; index < GARAGE_UPGRADES.length; index += 1) {
+      const up = GARAGE_UPGRADES[index];
+      const level = g[up.key];
+      const maxed = level >= up.prices.length;
+      const price = maxed ? 'MAX' : `$${up.prices[level]}`;
+      const pips = '●'.repeat(level) + '○'.repeat(up.prices.length - level);
+      const mark = index === g.selected ? '▶ ' : '   ';
+      lines.push(`${mark}${up.name} ${pips} — ${price} · ${up.desc}`);
+    }
+    lines.push('');
+    lines.push('Nitro: hold Shift while driving. Engine, armour and tyres apply at once.');
+    drawPanel("BENNY'S GARAGE", lines, '↑ ↓ select · Enter buy · Esc close', PALETTE.gold);
   }
 
   function drawPause(state, ui) {
     const items = ui.pauseItems;
-    const lines = [`Cash $${Math.floor(state.player.cash)} · ${['', 'Mission 1', 'Mission 2', 'Mission 3', 'Mission 4', 'Mission 5'][Math.min(5, state.missions.index + 1)]}`, ''];
+    const missionNo = Math.min(MISSIONS.length, state.missions.index + 1);
+    const lines = [`Cash $${Math.floor(state.player.cash)} · Mission ${missionNo} of ${MISSIONS.length} · Day ${state.day}`, ''];
     const height = 150 + lines.length * 32 + 64 + items.length * 40;
     const x = (VIEW.width - 620) / 2;
     const y = (VIEW.height - height) / 2;
@@ -693,7 +996,10 @@ export function createRenderer(canvas) {
     drawWorld(state);
     // Back to screen space for the HUD and overlays.
     ctx.setTransform(view.scale, 0, 0, view.scale, view.x, view.y);
+    drawLightTint(state);
     drawHud(state);
+    if (state.missions.passedTimer > 0 && state.missions.passed) drawPassed(state);
+    else if (state.garage.open) drawGarage(state);
     if (screen === SCREEN_PAUSED) drawPause(state, ui);
     else if (screen === SCREEN_OVER) drawOver(state, ui.overKind);
   }
@@ -711,7 +1017,7 @@ export function createRenderer(canvas) {
   function menuHitAreas(screen, ui) {
     if (screen === SCREEN_TITLE) {
       if (ui.showHowTo || ui.showMissions) return [];
-      const height = 150 + 3 * 32 + 64 + ui.menuItems.length * 40;
+      const height = 150 + 4 * 32 + 64 + ui.menuItems.length * 40;
       const y = (VIEW.height - height) / 2;
       return ui.menuItems.map((item, index) => ({
         index, x: 390, y: y + 168 + index * 40 - 26, w: 500, h: 36,

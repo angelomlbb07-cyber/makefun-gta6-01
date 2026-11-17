@@ -1,6 +1,7 @@
-// The story: five missions for Marco Solis, a driver working for the fixer Marisol Vega, plus
-// taxi fares once the city is his. Each mission is a list of steps; a step completes when the
-// player reaches its target, steals a car, or holds E long enough to crack the vault.
+// The story: twelve missions for Marco Solis, a driver working for the fixer Marisol Vega,
+// plus taxi fares once the city is his. Each mission is a list of steps; a step completes when
+// the player reaches its target, steals a car, or holds E long enough to crack the vault.
+// Missions run against a timer and end on a MISSION PASSED screen with payout and stats.
 
 import { MISSION_REWARDS, TAXI_FARE } from './config.js';
 import { dist } from './random.js';
@@ -9,6 +10,7 @@ export const MISSIONS = [
   {
     title: 'First Wheels',
     briefing: "Marisol: You need wheels, Marco. Take any car on the street and bring it to my garage.",
+    timeLimit: 240,
     steps: [
       { type: 'steal', text: 'Steal any car (walk up to one and press E)' },
       { type: 'goto', target: 'garage', text: "Drive to Rico's Garage" },
@@ -17,6 +19,7 @@ export const MISSIONS = [
   {
     title: 'The Pickup',
     briefing: 'Marisol: Eddie Ramos is waiting at the Palmera Hotel. Pick him up, take him to the Marina Restaurant. No trouble.',
+    timeLimit: 240,
     steps: [
       { type: 'pickup', target: 'hotel', text: 'Pick up Eddie at the Palmera Hotel' },
       { type: 'deliver', target: 'restaurant', text: 'Drive Eddie to the Marina Restaurant' },
@@ -25,6 +28,7 @@ export const MISSIONS = [
   {
     title: 'Getaway Driver',
     briefing: 'Marisol: The cops are on us. Lose them and get to the Safehouse — the paint shop clears your heat.',
+    timeLimit: 210,
     steps: [
       { type: 'escape', target: 'safehouse', text: 'Escape the police — reach the Safehouse', wanted: 45 },
     ],
@@ -32,6 +36,7 @@ export const MISSIONS = [
   {
     title: 'The Dock Job',
     briefing: 'Marisol: A package waits at Dock 9. Pick it up, deliver it to Warehouse 12. The PD is watching the docks — keep it clean.',
+    timeLimit: 240,
     steps: [
       { type: 'pickup', target: 'docks', text: 'Pick up the package at Dock 9', wanted: 12 },
       { type: 'deliver', target: 'warehouse', text: 'Deliver the package to Warehouse 12' },
@@ -40,9 +45,73 @@ export const MISSIONS = [
   {
     title: 'Sunset Heist',
     briefing: 'Marisol: The Coral Casino. Walk in, crack the vault, and run. The whole city will be on you — get to the boat.',
+    timeLimit: 300,
     steps: [
       { type: 'grab', target: 'casino', hold: 3, text: 'Get out of the car, walk into the Coral Casino, hold E to crack the vault' },
       { type: 'escape', target: 'boat', text: 'Escape with the cash — reach the boat at the marina', wanted: 75 },
+    ],
+  },
+  {
+    title: 'The Informant',
+    briefing: 'Marisol: Our man at Solmar General talks too much. Pick him up before the PD does, hide him at the Safehouse.',
+    timeLimit: 240,
+    steps: [
+      { type: 'pickup', target: 'hospital', text: 'Pick up the informant at Solmar General', wanted: 20 },
+      { type: 'deliver', target: 'safehouse', text: 'Get him to the Safehouse, clean' },
+    ],
+  },
+  {
+    title: 'Neon Nights',
+    briefing: 'Marisol: A high roller at the Coral Casino wants a ride to the Palmera Hotel. No cops, no fuss — he pays double.',
+    timeLimit: 210,
+    steps: [
+      { type: 'pickup', target: 'casino', text: 'Pick up the high roller at the Coral Casino' },
+      { type: 'deliver', target: 'hotel', text: 'Drive him to the Palmera Hotel' },
+    ],
+  },
+  {
+    title: 'Bank Job',
+    briefing: 'Marisol: Warehouse 12 holds the take from the Harbor Bank. Crack it open and run for the boat — the heli will be up.',
+    timeLimit: 300,
+    steps: [
+      { type: 'grab', target: 'warehouse', hold: 3, text: 'Walk into Warehouse 12, hold E to crack the stash' },
+      { type: 'escape', target: 'boat', text: 'Escape with the cash — reach the boat at the marina', wanted: 80 },
+    ],
+  },
+  {
+    title: 'The Rival',
+    briefing: 'Marisol: Rico keeps a Sunset GT at his garage and he owes me. Take it. Bring it to my garage — fast.',
+    timeLimit: 210,
+    steps: [
+      { type: 'steal', kind: 'sports', text: 'Steal a sports car (any red sports car will do)' },
+      { type: 'goto', target: 'garage', text: "Drive it to Rico's Garage" },
+    ],
+  },
+  {
+    title: 'Harbor Lights',
+    briefing: 'Marisol: A crate at Dock 9, a buyer at the Marina Restaurant. The docks are hot tonight — keep your head down.',
+    timeLimit: 240,
+    steps: [
+      { type: 'pickup', target: 'docks', text: 'Pick up the crate at Dock 9', wanted: 30 },
+      { type: 'deliver', target: 'restaurant', text: 'Deliver it to the Marina Restaurant' },
+    ],
+  },
+  {
+    title: 'The Long Con',
+    briefing: 'Marisol: Eddie is waiting at the hotel again, and this time the PD knows. Get him to Warehouse 12 and do not stop.',
+    timeLimit: 240,
+    steps: [
+      { type: 'pickup', target: 'hotel', text: 'Pick up Eddie at the Palmera Hotel', wanted: 35 },
+      { type: 'deliver', target: 'warehouse', text: 'Drive Eddie to Warehouse 12' },
+    ],
+  },
+  {
+    title: 'King of Solmar',
+    briefing: 'Marisol: One last job, Marco. The Coral Casino vault, then the Safehouse. Do this and Solmar is yours.',
+    timeLimit: 330,
+    steps: [
+      { type: 'grab', target: 'casino', hold: 4, text: 'Walk into the Coral Casino, hold E to crack the vault' },
+      { type: 'escape', target: 'safehouse', text: 'Escape with the cash — reach the Safehouse', wanted: 85 },
     ],
   },
 ];
@@ -58,6 +127,10 @@ export function createMissions() {
     finished: false,
     taxi: { phase: 'idle', from: null, to: null, fare: 0, timer: 0 },
     storyShown: false,
+    timer: 0, // seconds left on the current mission; 0 means no timer running
+    passed: null, // the MISSION PASSED screen data, shown for a few seconds after a win
+    passedTimer: 0,
+    stats: { shotsFired: 0, shotsHit: 0, carsDestroyed: 0, carsStolen: 0, startTime: 0 },
   };
 }
 
@@ -89,7 +162,7 @@ export function currentObjective(state) {
   const mission = currentMission(state);
   if (mission) {
     const step = currentStep(state);
-    return `${mission.title} — ${step.text}`;
+    return `MISSION ${state.missions.index + 1}/${MISSIONS.length} — ${mission.title} — ${step.text}`;
   }
   const taxi = state.missions.taxi;
   if (taxi.phase === 'pickup') return 'Taxi fare — pick up the passenger';
@@ -114,17 +187,47 @@ export function startMission(state, index) {
   m.index = index;
   m.step = 0;
   m.holdTimer = 0;
+  m.timer = MISSIONS[index].timeLimit || 0;
+  m.passed = null;
+  m.passedTimer = 0;
+  m.stats = { shotsFired: 0, shotsHit: 0, carsDestroyed: 0, carsStolen: 0, startTime: state.time };
   const mission = MISSIONS[index];
   showToast(state, mission.briefing, 6);
   state.events.briefing = true;
   startStep(state);
 }
 
+/** Mission rating from time, accuracy and chaos: 1-4 stars, shown on the passed screen. */
+export function missionRating(state, elapsed) {
+  const s = state.missions.stats;
+  const acc = s.shotsFired > 0 ? s.shotsHit / s.shotsFired : 1;
+  let stars = 2;
+  if (acc >= 0.5) stars += 1;
+  if (elapsed < 120) stars += 1;
+  if (s.carsDestroyed >= 3) stars -= 1;
+  return Math.max(1, Math.min(4, stars));
+}
+
 function completeMission(state) {
   const m = state.missions;
   const mission = MISSIONS[m.index];
   const reward = MISSION_REWARDS[m.index];
+  const elapsed = state.time - m.stats.startTime;
   state.player.cash += reward;
+  state.player.respect = (state.player.respect || 0) + 120 + m.index * 40;
+  state.player.armour = Math.min(100, (state.player.armour || 0) + 10);
+  m.passed = {
+    title: mission.title,
+    payout: reward,
+    time: Math.round(elapsed),
+    accuracy: m.stats.shotsFired > 0 ? Math.round((100 * m.stats.shotsHit) / m.stats.shotsFired) : 100,
+    carsDestroyed: m.stats.carsDestroyed,
+    carsStolen: m.stats.carsStolen,
+    maxWanted: state.police.stars,
+    rating: missionRating(state, elapsed),
+    index: m.index,
+  };
+  m.passedTimer = 6;
   showToast(state, `${mission.title} complete — $${reward} earned`, 5);
   state.events.missionComplete = true;
   state.events.autosave = true;
@@ -133,7 +236,7 @@ function completeMission(state) {
   m.holdTimer = 0;
   if (m.index >= MISSIONS.length) {
     m.finished = true;
-    showToast(state, 'SOLMAR IS YOURS — all five missions done. Taxi fares pay the bills now.', 8);
+    showToast(state, 'SOLMAR IS YOURS — all twelve missions done. Taxi fares pay the bills now.', 8);
     startTaxi(state);
   } else {
     m.betweenTimer = 2.5;
@@ -159,8 +262,23 @@ export function stepMissions(state, dt, input) {
   if (m.toastTimer > 0) m.toastTimer -= dt;
   if (m.betweenTimer > 0) {
     m.betweenTimer -= dt;
-    if (m.betweenTimer <= 0) startMission(state, m.index);
+    // The MISSION PASSED screen gets its full moment: the next mission waits for it.
+    if (m.passedTimer > 0) m.passedTimer -= dt;
+    if (m.betweenTimer <= 0 && m.passedTimer <= 0) startMission(state, m.index);
+    else if (m.betweenTimer <= 0) m.betweenTimer = 0.01;
     return;
+  }
+  // Mission timer: out of time and Marisol makes you run it again from the top.
+  if (currentMission(state) && m.timer > 0) {
+    m.timer -= dt;
+    if (m.timer <= 0) {
+      m.timer = 0;
+      m.step = 0;
+      m.holdTimer = 0;
+      showToast(state, 'Too slow — Marisol is not happy. Run it again.', 4);
+      startMission(state, m.index);
+      return;
+    }
   }
   const mission = currentMission(state);
   if (!mission) {
@@ -186,7 +304,8 @@ export function stepMissions(state, dt, input) {
   const step = currentStep(state);
   if (!step) return;
   if (step.type === 'steal') {
-    if (player.car) {
+    // A steal step with a kind wants that kind of car (The Rival wants a sports car).
+    if (player.car && (!step.kind || player.car.kind === step.kind)) {
       m.step += 1;
       state.events.pickup = true;
       if (m.step >= mission.steps.length) completeMission(state);

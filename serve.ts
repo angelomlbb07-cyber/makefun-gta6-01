@@ -69,4 +69,5 @@ createServer((request, response) => {
   createReadStream(file).pipe(response);
 }).listen(port, '127.0.0.1', () => {
   console.log(`game/ is on http://localhost:${port}`);
+  console.log('Screenshots: open /?shot=beach&seed=7 (also title, combat, passed) at 1280x800.');
 });

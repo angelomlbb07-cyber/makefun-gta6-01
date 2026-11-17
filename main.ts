@@ -1,9 +1,10 @@
 // SOLMAR — a working gta6-01 entry (Node 22, standard library only): an original open-world
-// crime game in a sun-soaked coastal city. Drive and steal cars, dodge the Solmar PD, run five
-// story missions, and save your progress — all as plain static files a desktop browser loads
-// offline (game/index.html and its ES modules, no library and no network request). The program
-// hands the game in: it copies game/ and screenshots/ from beside this file to /output and
-// writes /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
+// crime game in a sun-soaked coastal city. Drive and steal cars, dodge the Solmar PD and its
+// helicopter, run twelve story missions across three days, shoot, drift, and upgrade your car
+// at Benny's Garage — all as plain static files a desktop browser loads offline (game/index.html
+// and its ES modules, no library and no network request). The program hands the game in: it
+// copies game/ and screenshots/ from beside this file to /output and writes /output/dossier.json,
+// the summary the judge reads, with the vendored make.fun library.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
@@ -16,6 +17,12 @@ import { buildDossier } from './vendor/makefun-game.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+// The entry is game/ plus screenshots/; refuse a run with no game to hand in, so a broken
+// checkout fails loudly here instead of shipping an empty dossier to the grader.
+if (!existsSync(join(here, 'game', 'index.html'))) {
+  throw new Error('game/index.html is missing: nothing to hand in');
+}
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'game'), join(out, 'game'), { recursive: true });

@@ -32,6 +32,13 @@ export function createInput(target) {
     isDown(code) {
       return down.has(code);
     },
+    /** True when any of the listed keys is held (ShiftLeft/ShiftRight, WASD aliases). */
+    isDownAny(codes) {
+      for (const code of codes) {
+        if (down.has(code)) return true;
+      }
+      return false;
+    },
     /** True once per physical press; the first reader consumes it. */
     pressed(code) {
       if (pressedQueue.has(code)) {
