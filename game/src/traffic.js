@@ -86,7 +86,8 @@ function carAhead(cars, car) {
 }
 
 export function stepCar(car, city, cars, dt, rng) {
-  if (car.parked || !car.path) return;
+  // A car the player is driving is steered by the player, not by traffic.
+  if (car.parked || car.playerDriven || !car.path) return;
   const target = laneTarget(car);
   const d = dist(car.x, car.y, target.x, target.y);
   if (d < 26) {

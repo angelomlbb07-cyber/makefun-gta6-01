@@ -199,9 +199,10 @@ function stepDriving(state, input, dt) {
         spawnSparks(state, (car.x + other.x) / 2, (car.y + other.y) / 2);
         if (other.police) addHeat(state, WANTED.damageCopCar);
       }
-      const swap = car.speed * 0.5;
-      car.speed = other.speed * 0.4;
-      other.speed = swap;
+      // Nudge the other car forward instead of swapping speeds: a swap pins the
+      // player to a stopped car and the car can never get going again.
+      other.speed = Math.max(other.speed, Math.max(0, car.speed * 0.5));
+      car.speed *= 0.85;
     }
   }
   for (let index = 0; index < traffic.peds.length; index += 1) {

@@ -215,6 +215,23 @@ export function stepPolice(state, dt, rng) {
   for (let index = 0; index < police.copCars.length; index += 1) {
     stepCopCar(state, police.copCars[index], dt, rng);
   }
+  // Keep patrol cars from piling onto each other as they converge on the player.
+  for (let a = 0; a < police.copCars.length; a += 1) {
+    for (let b = a + 1; b < police.copCars.length; b += 1) {
+      const ca = police.copCars[a];
+      const cb = police.copCars[b];
+      const d = dist(ca.x, ca.y, cb.x, cb.y);
+      if (d < 44 && d > 0.01) {
+        const push = (44 - d) / 2;
+        const ax = (cb.x - ca.x) / d;
+        const ay = (cb.y - ca.y) / d;
+        cb.x += ax * push;
+        cb.y += ay * push;
+        ca.x -= ax * push;
+        ca.y -= ay * push;
+      }
+    }
+  }
   for (let index = 0; index < police.footCops.length; index += 1) {
     stepFootCop(state, police.footCops[index], dt);
   }

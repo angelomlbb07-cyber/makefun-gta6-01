@@ -10,7 +10,7 @@ import { resetGameState, clampCamera } from './state.js';
 import { stepPlayer, enterCar } from './player.js';
 import { stepTraffic, nearestCar } from './traffic.js';
 import { stepPolice } from './police.js';
-import { startMission, currentTarget } from './missions.js';
+import { startMission, currentTarget, stepMissions } from './missions.js';
 import { SCREEN_PLAY } from './render.js';
 
 /** A stand-in for the keyboard that the autopilot steers. */
@@ -56,6 +56,20 @@ function autopilotDrive(state, input, dt) {
     input.setDrive(0, false, false);
     return;
   }
+  // Stuck recovery: if the car has barely moved while throttling, reverse out for a
+  // second and re-path, instead of sitting against whatever is pinning it.
+  if (Math.abs(car.speed) < 15) car.stuckTimer = (car.stuckTimer || 0) + dt;
+  else car.stuckTimer = 0;
+  if (car.stuckTimer > 1.2) {
+    car.reverseTimer = 1;
+    car.stuckTimer = 0;
+    car.autoPath = null;
+  }
+  if (car.reverseTimer > 0) {
+    car.reverseTimer -= dt;
+    input.setDrive(0, false, true);
+    return;
+  }
   if (!car.autoPath || car.autoTimer <= 0) {
     car.autoPath = findPath(state.city, car.x, car.y, target.x, target.y);
     car.autoIndex = 0;
@@ -81,9 +95,11 @@ function autopilotDrive(state, input, dt) {
   while (diff > Math.PI) diff -= Math.PI * 2;
   while (diff < -Math.PI) diff += Math.PI * 2;
   const steer = clamp(diff * 2.2, -1, 1);
-  // Slow for corners: only throttle when roughly lined up, brake into sharp turns.
-  const go = Math.abs(diff) < 0.7;
-  const stop = Math.abs(diff) > 1.0 && Math.abs(car.speed) > 150;
+  // Slow for corners: only throttle when roughly lined up, brake into sharp turns — but a
+  // stopped car always throttles, or it can never turn and stays stuck at the corner.
+  const speed = Math.abs(car.speed);
+  const go = Math.abs(diff) < 0.7 || speed < 60;
+  const stop = Math.abs(diff) > 1.0 && speed > 150;
   input.setDrive(steer, go, stop);
 }
 
@@ -106,6 +122,7 @@ function runSim(state, input, seconds, drive) {
     stepPlayer(state, input, STEP);
     stepTraffic(state, STEP, state.rng);
     stepPolice(state, STEP, state.rng);
+    stepMissions(state, STEP, input);
     state.time += STEP;
     state.clockMinutes += STEP * 0.5;
     state.camera.x = state.player.x;
@@ -124,7 +141,7 @@ function runSim(state, input, seconds, drive) {
 }
 
 function putPlayerInCar(state, nearX, nearY, kind) {
-  const car = nearestCar(state.traffic.cars, nearX, nearY, 400);
+  const car = nearestCar(state.traffic.cars, nearX, nearY, 1500);
   if (!car) return false;
   if (kind) {
     car.kind = kind;
@@ -139,10 +156,13 @@ function putPlayerInCar(state, nearX, nearY, kind) {
 }
 
 const SCENES = {
-  chase: { mission: 2, seconds: 14, drive: true, carNear: 'garage' },
-  street: { mission: 1, seconds: 8, drive: false },
-  mission: { mission: 3, seconds: 12, drive: true, carNear: 'docks' },
-  escape: { mission: 4, seconds: 16, drive: true, carNear: 'casino', step: 1 },
+  // The chase starts far from the Safehouse so the escape is still on at the frame.
+  chase: { mission: 2, seconds: 9, drive: true, carNear: 'docks' },
+  // The walk starts far enough west that the player is still approaching the hotel at the
+  // frame (the pickup triggers inside 80 px, so 6 s leaves him ~200 px out, marker visible).
+  street: { mission: 1, seconds: 6, drive: false },
+  mission: { mission: 3, seconds: 12, drive: true, carNear: 'casino' },
+  escape: { mission: 4, seconds: 12, drive: true, carNear: 'casino', step: 1 },
 };
 
 /**
@@ -169,7 +189,7 @@ export function stageShot(name, state, seed) {
     runSim(state, input, scene.seconds, true);
   } else {
     const lm = state.city.landmarks.hotel;
-    state.player.x = lm.x - 320;
+    state.player.x = lm.x - 1200;
     state.player.y = lm.y + 60;
     runSim(state, input, scene.seconds, false);
   }
