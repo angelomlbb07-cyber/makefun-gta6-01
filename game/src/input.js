@@ -1,53 +1,72 @@
-// Keyboard and pointer input. Held keys give a steering direction; one-shot presses (start or
-// restart, pause) are queued as bit flags and taken once by the loop, so a press between two
-// frames is never lost and never counted twice.
-
-export const ACTION_CONFIRM = 1;
-export const ACTION_PAUSE = 2;
-
-const LEFT = new Set(['ArrowLeft', 'KeyA']);
-const RIGHT = new Set(['ArrowRight', 'KeyD']);
-const CONFIRM = new Set(['Space', 'Enter']);
-const PAUSE = new Set(['KeyP', 'Escape']);
+// Keyboard and mouse. Held keys are read every step; one-shot presses (E, F, Enter, P) are
+// queued and consumed on first read, so a press between two fixed steps is never lost and
+// never counted twice. Mouse clicks carry their position for the menus.
 
 export function createInput(target) {
-  let left = false;
-  let right = false;
-  let actions = 0;
+  const down = new Set();
+  const pressedQueue = new Set();
+  const mouse = { x: 0, y: 0, clicked: false, clickX: 0, clickY: 0 };
 
   window.addEventListener('keydown', (event) => {
-    if (LEFT.has(event.code)) left = true;
-    else if (RIGHT.has(event.code)) right = true;
-    else if (CONFIRM.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_CONFIRM;
-    } else if (PAUSE.has(event.code)) {
-      if (!event.repeat) actions |= ACTION_PAUSE;
-    } else return;
-    event.preventDefault();
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(event.code)) event.preventDefault();
+    if (!event.repeat) pressedQueue.add(event.code);
+    down.add(event.code);
   });
   window.addEventListener('keyup', (event) => {
-    if (LEFT.has(event.code)) left = false;
-    else if (RIGHT.has(event.code)) right = false;
+    down.delete(event.code);
   });
-  // A key released while the tab is hidden never sends keyup: let go of everything on blur.
   window.addEventListener('blur', () => {
-    left = false;
-    right = false;
+    down.clear();
   });
-  target.addEventListener('pointerdown', () => {
-    actions |= ACTION_CONFIRM;
+  target.addEventListener('pointerdown', (event) => {
+    mouse.clicked = true;
+    mouse.clickX = event.clientX;
+    mouse.clickY = event.clientY;
+  });
+  target.addEventListener('pointermove', (event) => {
+    mouse.x = event.clientX;
+    mouse.y = event.clientY;
   });
 
   return {
-    /** -1 for left, 1 for right, 0 for neither or both. */
-    direction() {
-      return (right ? 1 : 0) - (left ? 1 : 0);
+    isDown(code) {
+      return down.has(code);
     },
-    /** The one-shot presses since the last call, as ACTION_* flags. */
-    takeActions() {
-      const taken = actions;
-      actions = 0;
-      return taken;
+    /** True once per physical press; the first reader consumes it. */
+    pressed(code) {
+      if (pressedQueue.has(code)) {
+        pressedQueue.delete(code);
+        return true;
+      }
+      return false;
+    },
+    /** -1, 0 or 1 from A/D or the arrow keys. */
+    moveX() {
+      return ((down.has('KeyD') || down.has('ArrowRight')) ? 1 : 0) - ((down.has('KeyA') || down.has('ArrowLeft')) ? 1 : 0);
+    },
+    /** -1, 0 or 1 from W/S or the arrow keys. */
+    moveY() {
+      return ((down.has('KeyS') || down.has('ArrowDown')) ? 1 : 0) - ((down.has('KeyW') || down.has('ArrowUp')) ? 1 : 0);
+    },
+    /** True once per click; the first reader consumes it. */
+    clicked() {
+      if (mouse.clicked) {
+        mouse.clicked = false;
+        return true;
+      }
+      return false;
+    },
+    /** Drop every queued press and click (used when the screen changes, so a gameplay key
+     * never leaks into a menu and a menu key never leaks into the game). */
+    clearPressed() {
+      pressedQueue.clear();
+      mouse.clicked = false;
+    },
+    clickPos() {
+      return { x: mouse.clickX, y: mouse.clickY };
+    },
+    mousePos() {
+      return { x: mouse.x, y: mouse.y };
     },
   };
 }
