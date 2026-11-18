@@ -1,301 +1,281 @@
-// SOLMAR main loop: screens, input routing, save/continue, restart and
-// respawn, autosave, screenshot staging. F2/F6: restartMission clears the
-// between/passed timers and clamps through startMission; F12: respawn
-// teleports to the safehouse/hospital landmark and startMission never
-// teleports, so the landmark respawn is honoured.
+// SOLMAR — main.js
+// Boot and the one game loop. It wires the fourteen modules together:
+// config numbers, seeded random, state, city, traffic, player, police,
+// missions, audio, input, save, shots and render. Live play runs the full
+// update (player, traffic, police, enemies, missions, clock, camera,
+// audio); a staged screenshot (?shot=<name>&seed=<n>) builds one frozen
+// scene, paints it, and sets window.__solmarReady so a screenshot script
+// can capture it. No network is used anywhere.
 
-import { SCREEN, RADIO_STATIONS, GARAGE_UPGRADES } from './config.js';
-import { createState, addCash, setToast } from './state.js';
-import { createPlayer, stepPlayer, damagePlayer, enterCar, exitCar, nearestCar, fireWeapon, switchWeapon, reloadWeapon } from './player.js';
-import { spawnTraffic, spawnPeds, stepTraffic, stepPeds, stepBullets, stepParticles } from './traffic.js';
-import { stepPolice, stepWanted, clearPolice, addWanted } from './police.js';
-import { startMission, stepMissions, currentMission, MISSIONS } from './missions.js';
-import { saveGame, loadGame, hasSave } from './save.js';
-import { initInput, isDown, wasPressed, anyPressed, endFrame, KEYS } from './input.js';
-import { render, resize } from './render.js';
+import { VIEW_W, VIEW_H, TIMES_OF_DAY } from './config.js';
+import { makeRng } from './random.js';
+import { createGameState, tickFloats, showToast } from './state.js';
+import { buildCity } from './city.js';
+import { createPlayer, updatePlayer, putPlayerInCar, exitCar } from './player.js';
+import { updatePolice, clearPolice } from './police.js';
+import { spawnTraffic, spawnPedestrians, updateTraffic, updateEnemies } from './traffic.js';
+import { startMission, restartMission, stepMissions, dismissPassed, MISSIONS } from './missions.js';
+import { createAudio, resumeAudio, setMuted, updateEngine, updateSiren, updateRadio, cycleRadio, playPassed } from './audio.js';
+import { createInput, isDown, pressed, endFrameInput } from './input.js';
+import { saveGame, loadGame, applySave } from './save.js';
 import { stageShot } from './shots.js';
-import { landmark } from './city.js';
-import { initAudio, resumeAudio, setMuted, isMuted, startEngine, setEngine, startRadio, stopRadio, playCash } from './audio.js';
+import { drawGame } from './render.js';
+import { speedKmh } from './player.js';
+import { dist } from './random.js';
 
-const canvas = document.getElementById('game');
-const ctx = canvas.getContext('2d');
-const state = createState();
-let view = resize(canvas);
-let last = performance.now();
-let savedPassedKey = '';
+const SAFEHOUSE = { x: 520, y: 520 };
 
-window.__solmar = state;
+export function boot(canvas) {
+  const ctx = canvas.getContext('2d');
+  const params = new URLSearchParams(window.location.search);
+  const shotName = params.get('shot');
+  const seed = Number(params.get('seed') || 1) || 1;
+  const rng = makeRng(seed * 101 + 7);
+  const city = buildCity(seed);
+  const state = createGameState(seed);
+  state.player = createPlayer(SAFEHOUSE.x, SAFEHOUSE.y);
+  state.onAutosave = () => saveGame(state);
+  const input = createInput(canvas);
+  const audio = createAudio();
+  spawnTraffic(state, city, rng, 12);
+  spawnPedestrians(state, city, rng, 18);
+  // A parked car near the safehouse so the first minutes are not on foot.
+  putPlayerInCar(state, city);
+  exitCar(state);
 
-function readInput() {
+  const game = { state, city, input, audio, rng, canvas, ctx, shotName };
+
+  if (shotName) {
+    // Staged screenshot: build the scene, paint once, flag readiness.
+    // The scene is frozen — no gameplay update runs, so the frame the
+    // screenshot script captures is exactly the staged one.
+    stageShot(state, city, shotName, seed);
+    updateAim(game);
+    drawGame(ctx, state, city);
+    state.ready = true;
+    window.__solmarReady = true;
+    window.__solmarState = state;
+    requestAnimationFrame(function frozen() {
+      drawGame(ctx, state, city);
+      requestAnimationFrame(frozen);
+    });
+    return game;
+  }
+
+  // Live play starts on the title menu.
+  const saved = loadGame();
+  if (saved) state.saveInfo = saved ? describeSaveShort(saved) : null;
+  window.__solmarState = state;
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    updateAim(game);
+    update(game, dt);
+    drawGame(ctx, state, city);
+    endFrameInput(input);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+  return game;
+}
+
+function describeSaveShort(data) {
   return {
-    up: anyPressed(KEYS.up) || isDown('KeyW') || isDown('ArrowUp'),
-    down: isDown('KeyS') || isDown('ArrowDown'),
-    left: isDown('KeyA') || isDown('ArrowLeft'),
-    right: isDown('KeyD') || isDown('ArrowRight'),
-    run: isDown('ShiftLeft') || isDown('ShiftRight'),
-    nitro: isDown('ShiftLeft') || isDown('ShiftRight'),
-    handbrake: isDown('Space'),
-    enterCar: isDown('KeyE'),
-    shoot: isDown('KeyF') || isDown('Mouse0'),
+    day: data.day, cash: data.cash, mission: data.mission,
+    text: 'Day ' + data.day + ' · $' + data.cash.toLocaleString('en-US') +
+      ' · Mission ' + (data.mission + 1) + '/12',
   };
 }
 
-function newGame() {
-  const fresh = createState();
-  Object.keys(fresh).forEach((k) => { state[k] = fresh[k]; });
-  state.player = createPlayer(1500, 1150);
-  state.camera.x = 1500; state.camera.y = 1150;
-  state.saveSlot = null;
-  spawnTraffic(state, 14);
-  spawnPeds(state, 24);
-  state.screen = SCREEN.PLAY;
-  startMission(state, 0);
-  startRadio(0, RADIO_STATIONS[0].bpm);
-  startEngine();
-  window.__solmar = state;
-}
-
-function continueGame() {
-  const save = loadGame();
-  if (!save) { newGame(); return; }
-  // F8: loadGame already validated; clamp defensively anyway.
-  const index = Math.max(0, Math.min(save.missionIndex, MISSIONS.length - 1));
-  newGame();
-  state.cash = save.cash;
-  state.respect = save.respect || 0;
-  state.respectLevel = 1 + Math.floor(state.respect / 250);
-  state.day = save.day || 1;
-  if (save.garage) state.garage = save.garage;
-  state.player.x = save.playerX || 1500;
-  state.player.y = save.playerY || 1150;
-  state.player.health = save.health || 100;
-  state.camera.x = state.player.x;
-  state.camera.y = state.player.y;
-  startMission(state, index);
-  setToast(state, 'Welcome back, Marco. Day ' + state.day + ' — Marisol has work for you.', 4);
-}
-
-function restartMission() {
-  const m = state.missions;
-  // F6: clear the inter-mission and passed timers/state so the old
-  // mission cannot restart itself a second time.
-  m.betweenTimer = 0;
-  m.passedTimer = 0;
-  m.passed = null;
-  state.events.wasted = false;
-  state.events.busted = false;
-  state.overKind = '';
-  state.player.health = 100;
-  state.player.armour = Math.max(state.player.armour, 25);
-  clearPolice(state);
-  // F2: startMission clamps; past the last mission this stays free-roam.
-  const idx = Math.min(m.index, MISSIONS.length - 1);
-  state.screen = SCREEN.PLAY;
-  startMission(state, idx);
-}
-
-function respawn() {
-  const kind = state.overKind;
-  const fine = kind === 'wasted' ? 100 : 150;
-  state.cash = Math.max(0, state.cash - fine);
-  const spot = kind === 'wasted' ? landmark('hospital') : landmark('safehouse');
-  // F12: honour the landmark — teleport here, and startMission (which
-  // never teleports) leaves the player at the landmark.
-  if (state.player.car) { state.player.car.driver = null; state.player.car = null; }
-  state.player.onFoot = true;
-  state.player.x = spot.x;
-  state.player.y = spot.y;
-  state.player.health = 100;
-  state.player.armour = 25;
-  state.camera.x = spot.x;
-  state.camera.y = spot.y;
-  clearPolice(state);
-  state.events.wasted = false;
-  state.events.busted = false;
-  state.overKind = '';
-  state.screen = SCREEN.PLAY;
-  // Restart the current mission if the story is not finished (clamped).
-  if (!state.missions.finished && state.missions.index < MISSIONS.length) {
-    startMission(state, state.missions.index);
+function updateAim(game) {
+  const { state, input } = game;
+  const p = state.player;
+  if (!p) return;
+  const cam = state.camera;
+  const wx = (input.mouse.x - VIEW_W / 2) / cam.zoom + cam.x;
+  const wy = (input.mouse.y - VIEW_H / 2) / cam.zoom + cam.y;
+  p.aimAngle = Math.atan2(wy - p.y, wx - p.x);
+  // Title-menu hover: which button row is the mouse over?
+  if (state.mode === 'title') {
+    const my = input.mouse.y;
+    state.menuHover = -1;
+    for (let i = 0; i < 4; i++) {
+      if (input.mouse.x >= 440 && input.mouse.x <= 840 && my >= 310 + i * 66 && my <= 362 + i * 66) {
+        state.menuHover = i;
+      }
+    }
+    if (input.mouse.down && state.menuHover >= 0) menuAction(game, state.menuHover);
   }
 }
 
-function buyUpgrade() {
-  const u = GARAGE_UPGRADES[state.garageChoice || 0];
-  if (!u || state.garage[u.id]) return;
-  if (state.cash < u.cost) {
-    state.message = 'Not enough cash for ' + u.name + ' ($' + u.cost + ').';
-    state.messageTimer = 3;
+function menuAction(game, i) {
+  const { state, city } = game;
+  if (i === 0) newGame(game);
+  else if (i === 1) continueGame(game);
+  else if (i === 2) state.mode = 'howto';
+  else if (i === 3) state.mode = 'missions';
+}
+
+function newGame(game) {
+  const { state, city } = game;
+  const fresh = createGameState(state.seed);
+  fresh.player = state.player;
+  fresh.player.x = SAFEHOUSE.x;
+  fresh.player.y = SAFEHOUSE.y;
+  fresh.player.onFoot = true;
+  fresh.player.car = null;
+  fresh.player.angle = -Math.PI / 2;
+  Object.assign(state, fresh);
+  state.player = fresh.player;
+  state.onAutosave = () => saveGame(state);
+  clearPolice(state);
+  spawnTraffic(state, city, game.rng, 12);
+  spawnPedestrians(state, city, game.rng, 18);
+  // Park a car by the safehouse so the first minutes are not on foot.
+  putPlayerInCar(state, city);
+  exitCar(state);
+  state.mode = 'play';
+  startMission(state, 0, city);
+  resumeAudio(game.audio);
+}
+
+function continueGame(game) {
+  const { state, city } = game;
+  const saved = loadGame();
+  if (!saved) {
+    newGame(game);
     return;
   }
-  state.cash -= u.cost;
-  state.garage[u.id] = true;
-  if (u.id === 'armour' && state.player.car) state.player.car.hp += 60;
-  playCash();
-  state.message = u.name + ' installed at Benny\u2019s Garage.';
-  state.messageTimer = 3;
+  applySave(state, saved);
+  state.player.x = SAFEHOUSE.x;
+  state.player.y = SAFEHOUSE.y;
+  state.player.onFoot = true;
+  state.player.car = null;
+  state.mode = 'play';
+  if (saved.missionFinished) {
+    state.mission.finished = true;
+    state.mission.active = false;
+    state.mission.objective = 'Story complete — Solmar is yours. Free roam.';
+  } else {
+    startMission(state, saved.mission, city);
+  }
+  resumeAudio(game.audio);
 }
 
-function stepGame(dt) {
-  const input = readInput();
-  // Screenshot staging: keep the beach chase at full speed and the combat
-  // scene firing, so the staged frames stay alive until capture.
-  if (state.shotMode === 'beach' && state.player.car) {
-    input.up = true; input.left = false; input.right = false;
+function update(game, dt) {
+  const { state, city, input, audio, rng } = game;
+  state.playTime += dt;
+  // M mutes sound, but on the title menu M opens the Missions list.
+  if (pressed(input, 'KeyM') && (state.mode === 'play' || state.mode === 'pause' || state.mode === 'passed')) {
+    state.muted = !state.muted;
+    setMuted(audio, state.muted);
   }
-  if (state.shotMode === 'combat' && state.player.onFoot) {
-    state._shotFire = (state._shotFire || 0) - dt;
-    if (state._shotFire <= 0) { state._shotFire = 0.28; fireWeapon(state); }
+  if (state.mode === 'title' || state.mode === 'howto' || state.mode === 'missions') {
+    if (pressed(input, 'Enter')) newGame(game);
+    else if (pressed(input, 'KeyC')) continueGame(game);
+    else if (pressed(input, 'KeyH')) state.mode = 'howto';
+    else if (pressed(input, 'KeyM') && state.mode === 'title') state.mode = 'missions';
+    else if (pressed(input, 'Escape')) state.mode = 'title';
+    return;
   }
-  state.time += dt;
-  state.clockMinutes += dt * 0.6;
-  if (state.clockMinutes >= 24 * 60) { state.clockMinutes -= 24 * 60; }
-  state.day = Math.min(3, 1 + Math.floor(state.missions.index / 4));
-  if (state.messageTimer > 0) state.messageTimer -= dt;
+  if (state.mode === 'pause') {
+    if (pressed(input, 'Escape')) state.mode = 'play';
+    if (pressed(input, 'KeyR')) { restartMission(state, city); respawn(game); }
+    return;
+  }
+  if (state.mode === 'passed') {
+    stepMissions(state, dt, city); // F1: the timer ticks here too
+    if (pressed(input, 'Enter') || (input.mouse.down && state.mode === 'passed')) {
+      dismissPassed(state, city);
+    }
+    return;
+  }
+  if (state.mode === 'wasted' || state.mode === 'busted') {
+    if (pressed(input, 'KeyR') || pressed(input, 'Enter')) {
+      restartMission(state, city);
+      respawn(game);
+    }
+    return;
+  }
+  if (state.mode !== 'play') return;
+  if (pressed(input, 'Escape')) { state.mode = 'pause'; return; }
+  if (pressed(input, 'F5')) { saveGame(state); showToast(state, 'Progress saved.'); }
+  if (pressed(input, 'F9')) {
+    const saved = loadGame();
+    if (saved) { applySave(state, saved); startMission(state, saved.mission, city); showToast(state, 'Save loaded.'); }
+  }
+  if (pressed(input, 'KeyT')) cycleRadio(state, audio);
+  // Clock: one game minute every two real seconds; day 1-3, then it holds.
+  state.time += dt * 0.5;
+  if (state.time >= 1440) {
+    state.time -= 1440;
+    state.day = Math.min(3, state.day + 1);
+  }
+  state.timeOfDay = timeOfDayFor(state.time);
+  updatePlayer(state, input, dt, city, audio);
+  updateTraffic(state, dt, city, rng);
+  updatePolice(state, dt, city, rng);
+  updateEnemies(state, dt, city, rng);
+  stepMissions(state, dt, city);
+  collectPickups(state);
+  tickFloats(state, dt);
+  // Health slowly recovers when out of trouble (never from below zero —
+  // the wasted state is terminal until restart, per the F3 fix).
+  if (state.health > 0 && state.health < state.maxHealth && state.wanted === 0) {
+    state.health = Math.min(state.maxHealth, state.health + dt * 2);
+  }
   // Camera follows the player.
   const p = state.player;
-  const tx = p.x - 0;
-  const ty = p.y - 0;
-  state.camera.x += (tx - state.camera.x) * Math.min(1, dt * 4);
-  state.camera.y += (ty - state.camera.y) * Math.min(1, dt * 4);
-  stepPlayer(state, dt, input);
-  stepTraffic(state, dt);
-  stepPeds(state, dt);
-  stepPolice(state, dt);
-  stepWanted(state, dt);
-  stepMissions(state, dt, input);
-  stepBullets(state, dt);
-  stepParticles(state, dt);
-  // Shooting.
-  if (input.shoot && p.onFoot) fireWeapon(state);
-  // Enter / exit car.
-  if (wasPressed(KEYS.enterCar)) {
-    if (p.onFoot) {
-      const car = nearestCar(state, 90);
-      if (car) enterCar(state, car);
-    } else {
-      exitCar(state);
-    }
-  }
-  if (wasPressed('KeyQ')) switchWeapon(p);
-  if (wasPressed('KeyR')) reloadWeapon(p);
-  if (wasPressed(KEYS.radio)) {
-    state.radio.station = (state.radio.station + 1) % RADIO_STATIONS.length;
-    startRadio(state.radio.station, RADIO_STATIONS[state.radio.station].bpm);
-  }
-  // Near-miss cash: fast pass beside a traffic car.
-  if (p.car && Math.abs(p.car.speed) > 240) {
-    for (const car of state.cars) {
-      if (car.driver === 'player' || car._nearMissed) continue;
-      const d = Math.hypot(car.x - p.x, car.y - p.y);
-      if (d < 70) {
-        car._nearMissed = true;
-        addCash(state, 25, 'NEAR MISS +$25');
-        playCash();
-      }
-    }
-  }
-  // Taxi fare drop-off.
-  if (p.car && p.car.isTaxi && state.taxiFare > 0) {
-    const dest = landmark('neon');
-    if (Math.hypot(p.x - dest.x, p.y - dest.y) < 90) {
-      addCash(state, state.taxiFare, 'FARE +$' + state.taxiFare);
-      state.taxiFare = 0;
-      playCash();
-    }
-  }
-  // Engine sound follows speed.
-  setEngine(p.car ? Math.abs(p.car.speed) / 360 : 0, !!p.car);
-  // Autosave after each mission passes.
-  if (state.missions.passed) {
-    const key = state.missions.index + ':' + state.missions.passed.name;
-    if (savedPassedKey !== key) {
-      savedPassedKey = key;
-      saveGame(state);
-    }
-  }
-  // Wanted rises when the player shoots or steals in view of cops.
-  if (wasPressed('KeyF') && state.wanted < 5 && Math.random() < 0.25) addWanted(state, 0);
+  const targetZoom = p.onFoot ? 1.15 : 1;
+  state.camera.zoom += (targetZoom - state.camera.zoom) * dt * 2;
+  state.camera.x += (p.x - state.camera.x) * dt * 4;
+  state.camera.y += (p.y - state.camera.y) * dt * 4;
+  updateEngine(audio, speedKmh(state), p.onFoot);
+  updateSiren(audio, state.wanted);
+  updateRadio(audio, state, dt);
+  if (state.mode === 'passed') playPassed(audio);
 }
 
-function stepTitle(dt) {
-  if (wasPressed('ArrowUp') || wasPressed('KeyW')) {
-    state.titleChoice = (state.titleChoice + 3) % 4;
-  }
-  if (wasPressed('ArrowDown') || wasPressed('KeyS')) {
-    state.titleChoice = (state.titleChoice + 1) % 4;
-  }
-  if (wasPressed('Enter') || wasPressed('Space')) {
-    const choice = state.titleChoice;
-    if (choice === 0) newGame();
-    else if (choice === 1) { if (hasSave()) continueGame(); else newGame(); }
-    else if (choice === 2) state.screen = SCREEN.HOWTO;
-    else if (choice === 3) state.screen = SCREEN.MISSIONS;
+function timeOfDayFor(minutes) {
+  if (minutes >= 360 && minutes < 960) return 'day';
+  if (minutes >= 960 && minutes < 1110) return 'golden';
+  if (minutes >= 1110 && minutes < 1230) return 'sunset';
+  return 'night';
+}
+
+function collectPickups(state) {
+  const p = state.player;
+  if (!p) return;
+  for (const pk of state.pickups) {
+    if (!pk.taken && dist(p.x, p.y, pk.x, pk.y) < 52) {
+      pk.taken = true;
+      state.mission.stats.collected += 1;
+      showToast(state, 'Package collected (' + state.mission.stats.collected + ').');
+    }
   }
 }
 
-function frame(now) {
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
-  if (wasPressed(KEYS.mute)) setMuted(!isMuted());
-  if (state.screen === SCREEN.TITLE) stepTitle(dt);
-  else if (state.screen === SCREEN.HOWTO || state.screen === SCREEN.MISSIONS) {
-    if (wasPressed('Enter') || wasPressed('Escape') || wasPressed('Space')) state.screen = SCREEN.TITLE;
-  } else if (state.screen === SCREEN.PLAY) {
-    if (wasPressed(KEYS.pause) || wasPressed('Escape')) {
-      state.screen = SCREEN.PAUSE;
-    } else if (wasPressed('KeyG')) {
-      const g = landmark('garage');
-      if (Math.hypot(state.player.x - g.x, state.player.y - g.y) < 160) {
-        state.screen = SCREEN.GARAGE;
-        state.garageChoice = 0;
-      } else {
-        state.message = 'Drive to Benny\u2019s Garage to buy upgrades.';
-        state.messageTimer = 3;
-      }
-    } else {
-      stepGame(dt);
-    }
-  } else if (state.screen === SCREEN.PAUSE) {
-    if (wasPressed('Enter') || wasPressed(KEYS.pause) || wasPressed('Escape')) state.screen = SCREEN.PLAY;
-    else if (wasPressed('KeyG')) { state.screen = SCREEN.GARAGE; state.garageChoice = 0; }
-    else if (wasPressed('KeyR')) restartMission();
-    else if (wasPressed('KeyS')) { saveGame(state); state.screen = SCREEN.TITLE; state.saveSlot = loadGame(); }
-  } else if (state.screen === SCREEN.GARAGE) {
-    if (wasPressed('ArrowUp') || wasPressed('KeyW')) state.garageChoice = ((state.garageChoice || 0) + 3) % 4;
-    if (wasPressed('ArrowDown') || wasPressed('KeyS')) state.garageChoice = ((state.garageChoice || 0) + 1) % 4;
-    if (wasPressed('Enter')) buyUpgrade();
-    if (wasPressed('Escape')) state.screen = SCREEN.PAUSE;
-  } else if (state.screen === SCREEN.OVER) {
-    state.overTimer += dt;
-    if (wasPressed('Enter') && state.overTimer > 0.8) respawn();
-  }
-  render(state, canvas, ctx, view);
-  endFrame();
-  requestAnimationFrame(frame);
+function respawn(game) {
+  const { state, city } = game;
+  state.player.x = SAFEHOUSE.x;
+  state.player.y = SAFEHOUSE.y;
+  state.player.onFoot = true;
+  state.player.car = null;
+  state.player.angle = -Math.PI / 2;
+  state.player.speed = 0;
+  state.camera.x = SAFEHOUSE.x;
+  state.camera.y = SAFEHOUSE.y;
+  state.mode = 'play';
+  clearPolice(state);
 }
 
-function boot() {
-  initInput(canvas);
-  initAudio();
-  window.addEventListener('resize', () => { view = resize(canvas); });
-  document.addEventListener('pointerdown', () => { initAudio(); resumeAudio(); }, { once: true });
-  document.addEventListener('keydown', () => { initAudio(); resumeAudio(); }, { once: true });
-  const params = new URLSearchParams(window.location.search);
-  const shot = params.get('shot');
-  state.player = createPlayer(1500, 1150);
-  state.camera.x = 1500; state.camera.y = 1150;
-  spawnTraffic(state, 14);
-  spawnPeds(state, 24);
-  state.saveSlot = loadGame();
-  if (shot) {
-    // Screenshot staging: build the scene, then let it settle.
-    stageShot(state, shot);
-    setTimeout(() => { window.__shotReady = true; }, 1200);
-  } else {
-    window.__shotReady = true;
+// Auto-boot when the page loads.
+if (typeof document !== 'undefined') {
+  const canvas = document.getElementById('game');
+  if (canvas) {
+    canvas.width = VIEW_W;
+    canvas.height = VIEW_H;
+    boot(canvas);
   }
-  requestAnimationFrame(frame);
 }
-
-boot();

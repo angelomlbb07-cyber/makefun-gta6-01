@@ -1,65 +1,90 @@
-// Seeded random helpers for SOLMAR: deterministic world layout, live chaos.
-// The dossier path never calls these with a live seed; gameplay uses Math.random.
+// SOLMAR — random.js
+// Small deterministic random helpers. Everything in the game that needs
+// luck goes through a seeded generator, so a staged screenshot with a given
+// seed always builds the same city, the same traffic and the same crowds.
 
-export function mulberry32(seed) {
+// mulberry32: a tiny fast seeded PRNG with a good distribution.
+export function makeRng(seed) {
   let a = seed >>> 0;
-  return function next() {
-    a |= 0; a = (a + 0x6d2b79f5) | 0;
+  if (a === 0) a = 0x9e3779b9;
+  return function rng() {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
+// Hash a short string into a 32-bit seed, so names can seed generators too.
+export function hashSeed(text) {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return h >>> 0;
+}
+
+export function range(rng, lo, hi) {
+  return lo + rng() * (hi - lo);
+}
+
+export function rangeInt(rng, lo, hi) {
+  return lo + Math.floor(rng() * (hi - lo + 1));
+}
+
 export function pick(rng, list) {
   return list[Math.floor(rng() * list.length)];
 }
 
-export function range(rng, min, max) {
-  return min + rng() * (max - min);
+export function pickN(rng, list, n) {
+  const copy = list.slice();
+  const out = [];
+  while (copy.length && out.length < n) {
+    out.push(copy.splice(Math.floor(rng() * copy.length), 1)[0]);
+  }
+  return out;
 }
 
-export function rangeInt(rng, min, max) {
-  return min + Math.floor(rng() * (max - min + 1));
+// Fisher-Yates shuffle that never mutates its input.
+export function shuffle(rng, list) {
+  const copy = list.slice();
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    const t = copy[i];
+    copy[i] = copy[j];
+    copy[j] = t;
+  }
+  return copy;
 }
 
 export function chance(rng, p) {
   return rng() < p;
 }
 
-export function clamp(value, min, max) {
-  return value < min ? min : value > max ? max : value;
+export function clamp(v, lo, hi) {
+  return v < lo ? lo : v > hi ? hi : v;
 }
 
 export function lerp(a, b, t) {
   return a + (b - a) * t;
 }
 
-export function dist(ax, ay, bx, by) {
-  return Math.hypot(ax - bx, ay - by);
+export function dist(x1, y1, x2, y2) {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
-export function angleTo(ax, ay, bx, by) {
-  return Math.atan2(by - ay, bx - ax);
+export function angleTo(x1, y1, x2, y2) {
+  return Math.atan2(y2 - y1, x2 - x1);
 }
 
-export function wrapAngle(a) {
-  while (a > Math.PI) a -= Math.PI * 2;
-  while (a < -Math.PI) a += Math.PI * 2;
-  return a;
-}
-
-export function formatMoney(n) {
-  return '$' + Math.floor(n).toLocaleString('en-US');
-}
-
-export function formatTime(seconds) {
-  const s = Math.max(0, Math.ceil(seconds));
-  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
-}
-
-export function formatClock(minutes) {
-  const h = Math.floor(minutes / 60) % 24;
-  const m = Math.floor(minutes % 60);
-  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+// Shortest signed turn from angle a towards angle b, in (-PI, PI].
+export function angleDiff(a, b) {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d <= -Math.PI) d += Math.PI * 2;
+  return d;
 }

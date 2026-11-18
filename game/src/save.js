@@ -1,25 +1,31 @@
-// SOLMAR save: localStorage autosave after each mission, with validation.
-// F8 fix: a save whose mission index is out of range (or not an integer)
-// is rejected — loadGame returns null instead of crashing Continue.
+// SOLMAR — save.js
+// localStorage autosave: after every mission, and on demand with quick
+// save. Loading validates the save (F8): a mission index out of range, a
+// non-numeric cash value, or a day outside 1-3 returns null instead of
+// loading garbage and crashing the game. Storage access is guarded so the
+// game also runs where localStorage is unavailable (private mode, file://).
 
-const SAVE_KEY = 'solmar-save-v1';
+import { MISSION_COUNT } from './config.js';
+
+const KEY = 'solmar-save-v3';
 
 export function saveGame(state) {
+  const data = {
+    version: 3,
+    day: state.day,
+    cash: Math.round(state.cash),
+    mission: state.mission.index,
+    missionFinished: state.mission.finished,
+    health: Math.round(state.health),
+    armour: Math.round(state.armour),
+    respect: Math.round(state.respect),
+    radioStation: state.radioStation,
+    garage: { ...state.garage },
+    savedAt: new Date().toISOString(),
+  };
   try {
-    const data = {
-      version: 1,
-      cash: Math.floor(state.cash),
-      respect: Math.floor(state.respect),
-      missionIndex: state.missions.index,
-      day: state.day,
-      garage: state.garage,
-      playerX: Math.floor(state.player.x),
-      playerY: Math.floor(state.player.y),
-      health: Math.floor(state.player.health),
-      savedAt: Date.now(),
-    };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
-    state.saveSlot = data;
+    localStorage.setItem(KEY, JSON.stringify(data));
+    state.saveInfo = describeSave(data);
     return true;
   } catch (e) {
     return false;
@@ -27,20 +33,57 @@ export function saveGame(state) {
 }
 
 export function loadGame() {
+  let raw = null;
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    const data = JSON.parse(raw);
-    if (typeof data !== 'object' || data === null) return null;
-    if (typeof data.cash !== 'number' || !Number.isFinite(data.cash)) return null;
-    // F8: mission index must be a valid integer inside the story range.
-    if (!Number.isInteger(data.missionIndex) || data.missionIndex < 0 || data.missionIndex > 12) return null;
-    if (typeof data.respect !== 'number' || !Number.isFinite(data.respect)) return null;
-    if (data.day !== undefined && (!Number.isInteger(data.day) || data.day < 1 || data.day > 3)) return null;
-    return data;
+    raw = localStorage.getItem(KEY);
   } catch (e) {
     return null;
   }
+  if (!raw) return null;
+  let data = null;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+  return validateSave(data);
+}
+
+// F8: reject anything that is not a sane save.
+export function validateSave(data) {
+  if (!data || typeof data !== 'object') return null;
+  if (typeof data.cash !== 'number' || !Number.isFinite(data.cash) || data.cash < 0) return null;
+  if (typeof data.mission !== 'number' || !Number.isInteger(data.mission) ||
+    data.mission < 0 || data.mission >= MISSION_COUNT) return null;
+  if (typeof data.day !== 'number' || !Number.isInteger(data.day) || data.day < 1 || data.day > 3) return null;
+  if (typeof data.health !== 'number' || data.health < 0 || data.health > 200) return null;
+  if (typeof data.respect !== 'number' || data.respect < 0) return null;
+  return data;
+}
+
+export function applySave(state, data) {
+  state.day = data.day;
+  state.cash = data.cash;
+  state.health = data.health;
+  state.armour = typeof data.armour === 'number' ? data.armour : 0;
+  state.respect = data.respect;
+  state.radioStation = data.radioStation || 0;
+  if (data.garage) state.garage = { ...state.garage, ...data.garage };
+  state.mission.index = data.mission;
+  state.mission.finished = !!data.missionFinished;
+  state.saveInfo = describeSave(data);
+}
+
+export function describeSave(data) {
+  const missionText = data.missionFinished
+    ? 'Story complete'
+    : 'Mission ' + (data.mission + 1) + '/' + MISSION_COUNT;
+  return {
+    day: data.day,
+    cash: data.cash,
+    mission: data.mission,
+    text: 'Day ' + data.day + ' · $' + data.cash.toLocaleString('en-US') + ' · ' + missionText,
+  };
 }
 
 export function hasSave() {
@@ -48,5 +91,7 @@ export function hasSave() {
 }
 
 export function clearSave() {
-  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
+  try {
+    localStorage.removeItem(KEY);
+  } catch (e) { /* storage is best-effort */ }
 }

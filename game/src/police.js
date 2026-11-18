@@ -1,152 +1,155 @@
-// SOLMAR police: wanted level, cop cars that pathfind and ram, foot cops
-// that chase, punch and bust, roadblocks at 3 stars, helicopter at 2+.
-// F3 fix: ALL police damage goes through damagePlayer() — never direct
-// health subtraction — so a kill on foot always triggers WASTED.
+// SOLMAR — police.js
+// The wanted system: heat, cop cars that pathfind and ram, foot cops that
+// chase, punch and bust, roadblocks at 3+ stars, and the police helicopter
+// with its searchlight at 2+ stars. Every hit on the player goes through
+// damagePlayer in state.js (F3): that is the only place WASTED is set, so
+// being killed on foot by the police can never silently fail again.
+// Heat decays while the player stays quiet; committing crimes raises it.
 
-import { WANTED, WORLD } from './config.js';
-import { clamp, dist, wrapAngle } from './random.js';
-import { findPath, nearestRoadPoint } from './city.js';
-import { damagePlayer } from './player.js';
-import { startSiren, stopSiren } from './audio.js';
+import { POLICE_CAR, MAX_WANTED } from './config.js';
+import { clamp, dist, angleDiff, angleTo, range } from './random.js';
+import { nearestRoadPoint, isRoadAt } from './city.js';
+import { damagePlayer, setWanted, showToast, addFloat } from './state.js';
+import { createCar } from './player.js';
 
-export function addWanted(state, stars) {
-  state.wanted = clamp(state.wanted + stars, 0, 5);
-  state.heat = state.wanted;
-}
+let copId = 1;
 
-export function stepWanted(state, dt) {
-  if (state.wanted > 0) {
-    state.heat = Math.max(0, state.heat - WANTED.decayPerSecond * dt);
-    if (state.heat < state.wanted - 0.99) state.wanted = Math.max(0, Math.floor(state.heat));
-  }
-  if (state.wanted >= 1) startSiren();
-  else stopSiren();
-}
-
-export function spawnCopCar(state) {
-  const p = state.player;
-  const a = Math.random() * Math.PI * 2;
-  const pt = nearestRoadPoint(
-    clamp(p.x + Math.cos(a) * 700, 100, WORLD.width - 100),
-    clamp(p.y + Math.sin(a) * 700, 100, WORLD.height - 500),
-  );
-  state.copCars.push({
-    x: pt.x, y: pt.y, angle: 0, speed: 0, hp: 120, maxHp: 120,
-    color: '#20242c', name: 'Interceptor', path: null, pathI: 0,
-    ramCooldown: 0, dead: false, def: 1,
-  });
-}
-
-export function spawnFootCop(state) {
-  const p = state.player;
-  const a = Math.random() * Math.PI * 2;
-  state.footCops.push({
-    x: clamp(p.x + Math.cos(a) * 320, 40, WORLD.width - 40),
-    y: clamp(p.y + Math.sin(a) * 320, 40, WORLD.height - 460),
-    angle: 0, hp: 50, punchCooldown: 0, bustTimer: 0,
-  });
-}
-
-export function stepPolice(state, dt) {
+export function updatePolice(state, dt, city, rng) {
   const p = state.player;
   if (!p) return;
-  const wantCops = Math.min(4, state.wanted);
-  while (state.copCars.length < wantCops) spawnCopCar(state);
-  while (state.copCars.length > wantCops && state.wanted === 0) state.copCars.pop();
-  if (state.wanted >= 2 && state.footCops.length < 2) spawnFootCop(state);
-  if (state.wanted === 0) state.footCops.length = 0;
-
-  // Cop cars: pathfind to the player, ram on contact (F3: via damagePlayer).
-  for (const cop of state.copCars) {
-    cop.ramCooldown = Math.max(0, cop.ramCooldown - dt);
-    if (!cop.path || cop.pathI >= cop.path.length || Math.random() < dt * 0.25) {
-      cop.path = findPath(cop.x, cop.y, p.x, p.y);
-      cop.pathI = 0;
-    }
-    const target = cop.path[Math.min(cop.pathI, cop.path.length - 1)];
-    const d = dist(cop.x, cop.y, target.x, target.y);
-    if (d < 40) cop.pathI++;
-    const want = Math.atan2(target.y - cop.y, target.x - cop.x);
-    cop.angle += clamp(wrapAngle(want - cop.angle), -2.2 * dt, 2.2 * dt);
-    const cruise = WANTED.copCarSpeed + state.wanted * 12;
-    cop.speed += (cruise - cop.speed) * dt * 0.9;
-    cop.x += Math.cos(cop.angle) * cop.speed * dt;
-    cop.y += Math.sin(cop.angle) * cop.speed * dt;
-    const pd = dist(cop.x, cop.y, p.x, p.y);
-    if (pd < 46 && cop.ramCooldown <= 0) {
-      cop.ramCooldown = 0.6;
-      cop.speed *= 0.4;
-      // F3: never subtract health directly — route through damagePlayer.
-      damagePlayer(state, WANTED.ramDamage);
-      if (p.car) {
-        p.car.hp -= 12;
-        if (p.car.hp <= 0) {
-          state.missions.stats.carsDestroyed++;
-          p.car.dead = true;
-        }
-      }
-      state.particles.push({ x: p.x, y: p.y, vx: 0, vy: 0, life: 0.25, max: 0.25, color: '#ff5a3d', size: 12 });
+  // Heat decay: stay out of trouble and the stars fade, one at a time.
+  if (state.wanted > 0) {
+    state.wantedHeat -= dt * 0.02;
+    if (state.wantedHeat <= 0) {
+      state.wantedHeat = 0.45;
+      setWanted(state, state.wanted - 1);
+      if (state.wanted === 0) showToast(state, 'You lost the cops. Lay low.');
     }
   }
-
-  // Foot cops: chase, punch (F3: via damagePlayer), and bust a still player.
-  for (const cop of state.footCops) {
-    cop.punchCooldown = Math.max(0, cop.punchCooldown - dt);
-    const d = dist(cop.x, cop.y, p.x, p.y);
-    if (d > 34) {
-      const a = Math.atan2(p.y - cop.y, p.x - cop.x);
-      cop.angle = a;
-      cop.x += Math.cos(a) * 165 * dt;
-      cop.y += Math.sin(a) * 165 * dt;
-      cop.bustTimer = 0;
-    } else {
-      cop.bustTimer += dt;
-      if (cop.punchCooldown <= 0 && p.health > 0) {
-        cop.punchCooldown = 1.1;
-        // F3: never subtract health directly — route through damagePlayer.
-        damagePlayer(state, WANTED.punchDamage);
-      }
-      if (cop.bustTimer > 1.5 && p.onFoot && state.wanted >= 1 && !state.events.busted && !state.shotMode) {
-        state.events.busted = true;
-        state.overKind = 'busted';
-        state.screen = 'over';
-        state.overTimer = 0;
-        state.cash = Math.max(0, state.cash - WANTED.bustFine);
-      }
-    }
+  // Helicopter at 2+ stars: follows the player, searchlight sweeping.
+  if (state.wanted >= 2) {
+    if (!state.heli) state.heli = { x: p.x - 300, y: p.y - 300, angle: 0 };
+    const h = state.heli;
+    const a = angleTo(h.x, h.y, p.x, p.y);
+    h.angle += angleDiff(h.angle, a) * dt * 1.2;
+    h.x += Math.cos(a) * 260 * dt;
+    h.y += Math.sin(a) * 260 * dt;
+    if (rng() < dt * 0.2) addFloat(state, p.x, p.y - 60, 'AIR SUPPORT OVERHEAD', '#9ec8ff');
+  } else {
+    state.heli = null;
   }
-
-  // Helicopter with searchlight at 2+ stars.
-  const heli = state.heli;
-  heli.active = state.wanted >= WANTED.heliMinStars;
-  if (heli.active) {
-    const a = Math.atan2(p.y - heli.y, p.x - heli.x);
-    heli.angle = a;
-    const hd = dist(heli.x, heli.y, p.x, p.y);
-    const sp = hd > 260 ? 240 : 120;
-    heli.x += Math.cos(a) * sp * dt;
-    heli.y += Math.sin(a) * sp * dt;
-    if (hd < 40) { heli.x = p.x + 200; heli.y = p.y - 200; }
+  // Cop cars: one per wanted star, up to 4, spawning on nearby roads.
+  const wantCars = Math.min(state.wanted, 4);
+  while (state.cops.length < wantCars) {
+    const spot = nearestRoadPoint(p.x + range(rng, -500, 500), p.y + range(rng, -500, 500));
+    const car = createCar(POLICE_CAR, spot.x, spot.y, 0, 'police');
+    car.id = copId++;
+    state.cops.push(car);
+    state.cars.push(car);
   }
-
-  // Roadblocks at 3+ stars: two parked cop cars across the road ahead.
-  if (state.wanted >= WANTED.roadblockMinStars && state.roadblocks.length === 0 && p.car) {
-    const ahead = { x: p.x + Math.cos(p.angle) * 500, y: p.y + Math.sin(p.angle) * 500 };
-    const pt = nearestRoadPoint(ahead.x, ahead.y);
+  while (state.cops.length > wantCars) {
+    const gone = state.cops.pop();
+    const i = state.cars.indexOf(gone);
+    if (i >= 0) state.cars.splice(i, 1);
+  }
+  for (const cop of state.cops) updateCopCar(state, cop, dt, city);
+  // Foot cops: one per two wanted stars, spawning near the player on foot.
+  const wantFoot = state.wanted >= 1 ? Math.min(3, Math.floor(state.wanted / 2) + 1) : 0;
+  while (state.footCops.length < wantFoot) {
+    state.footCops.push({
+      x: p.x + range(rng, -260, 260), y: p.y + range(rng, -260, 260),
+      angle: 0, hp: 50, punchT: 0, down: false, bustT: 0,
+    });
+  }
+  while (state.footCops.length > wantFoot) state.footCops.pop();
+  for (const fc of state.footCops) updateFootCop(state, fc, dt, city);
+  state.footCops = state.footCops.filter((fc) => !fc.down || fc.bustT < 8);
+  // Roadblocks at 3+ stars: two cruisers parked across the road ahead.
+  if (state.wanted >= 3 && state.roadblocks.length === 0) {
+    const ahead = { x: p.x + Math.cos(p.angle) * 520, y: p.y + Math.sin(p.angle) * 520 };
+    const spot = nearestRoadPoint(ahead.x, ahead.y);
     state.roadblocks = [
-      { x: pt.x - 60, y: pt.y, angle: p.angle + Math.PI / 2 },
-      { x: pt.x + 60, y: pt.y, angle: p.angle + Math.PI / 2 },
+      { x: spot.x - 40, y: spot.y, angle: p.angle + Math.PI / 2 },
+      { x: spot.x + 40, y: spot.y, angle: p.angle + Math.PI / 2 },
     ];
+    showToast(state, 'Roadblock ahead! The Solmar PD is waiting for you.');
   }
-  if (state.wanted < WANTED.roadblockMinStars) state.roadblocks = [];
+  if (state.wanted < 3) state.roadblocks = [];
 }
 
+function updateCopCar(state, cop, dt, city) {
+  const p = state.player;
+  const d = dist(cop.x, cop.y, p.x, p.y);
+  const target = angleTo(cop.x, cop.y, p.x, p.y);
+  cop.angle += clamp(angleDiff(cop.angle, target), -2.4 * dt, 2.4 * dt);
+  const wantSpeed = d > 700 ? 620 : d > 260 ? 560 : 480;
+  cop.speed += (wantSpeed - cop.speed) * dt * 0.8;
+  cop.x += Math.cos(cop.angle) * cop.speed * dt;
+  cop.y += Math.sin(cop.angle) * cop.speed * dt;
+  cop.x = clamp(cop.x, 60, 3140);
+  cop.y = clamp(cop.y, 60, 2340);
+  // Ram: contact with the player damages through damagePlayer (F3).
+  if (d < 62) {
+    if (p.onFoot) {
+      damagePlayer(state, 22, 'ram');
+    } else if (p.car) {
+      p.car.hp -= 6;
+      cop.speed *= 0.4;
+      if (p.car.hp <= 0) {
+        state.mission.stats.carsDestroyed += 1;
+        addFloat(state, p.car.x, p.car.y - 30, 'CAR WRECKED', '#ff5a5a');
+      }
+      damagePlayer(state, 6, 'ram');
+    }
+    // Shove the cop back so it does not sit on top of the player.
+    cop.x -= Math.cos(cop.angle) * 70;
+    cop.y -= Math.sin(cop.angle) * 70;
+  }
+}
+
+function updateFootCop(state, fc, dt, city) {
+  const p = state.player;
+  if (fc.down) { fc.bustT += dt; return; }
+  const d = dist(fc.x, fc.y, p.x, p.y);
+  const a = angleTo(fc.x, fc.y, p.x, p.y);
+  fc.angle = a;
+  fc.punchT = Math.max(0, fc.punchT - dt);
+  if (d > 34) {
+    const speed = p.onFoot ? 205 : 150;
+    fc.x += Math.cos(a) * speed * dt;
+    fc.y += Math.sin(a) * speed * dt;
+    fc.bustT = 0;
+  } else if (p.onFoot) {
+    // Punch: routed through damagePlayer (F3) with the invulnerability
+    // window, so a beating can kill the player and trigger WASTED.
+    if (fc.punchT <= 0) {
+      fc.punchT = 0.9;
+      damagePlayer(state, 14, 'punch');
+    }
+    // Bust: the player is cornered on foot, slow, and the cop is on top.
+    fc.bustT += dt;
+    if (fc.bustT > 2.5 && !state.events.wasted) {
+      state.events.busted = true;
+      state.mode = 'busted';
+      state.wanted = 0;
+      showToast(state, 'BUSTED — the Solmar PD has you.');
+    }
+  }
+}
+
+// Called when the player commits a loud crime in the open.
+export function reportCrime(state, level, reason) {
+  if (state.wanted < level) setWanted(state, level, reason);
+  else state.wantedHeat = clamp(state.wantedHeat + 0.25, 0, 1);
+}
+
+// Clear all police pressure, for example when a mission ends cleanly.
 export function clearPolice(state) {
-  state.copCars = [];
+  state.cops = [];
   state.footCops = [];
   state.roadblocks = [];
-  state.heli.active = false;
+  state.heli = null;
+  state.cars = state.cars.filter((c) => c.driver !== 'police');
   state.wanted = 0;
-  state.heat = 0;
-  stopSiren();
+  state.wantedHeat = 0;
 }
