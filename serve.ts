@@ -1,6 +1,8 @@
 // SOLMAR — serve.ts (Node 22, standard library only)
 // A tiny static server for game/, so the entry can be played locally
 // without a build step: `node serve.ts` serves game/ on localhost:8080.
+// Round 5: unchanged — the screenshot captures and the play-test run
+// through this same server on its default port.
 // It sends the MIME types a browser game needs, refuses any path outside
 // game/, answers 404 for missing files, and does nothing clever: this is
 // a development convenience, not a web server for the internet.

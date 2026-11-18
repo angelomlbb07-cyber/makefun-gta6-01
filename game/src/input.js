@@ -3,7 +3,8 @@
 // ArrowUp, Space, ...) so layouts do not matter. pressed() fires once per
 // physical press, isDown() stays true while held. The mouse position is
 // kept in canvas pixels and converted to an aim angle by main.js, which
-// knows the camera. Nothing here touches the game state.
+// knows the camera. Nothing here touches the game state. Round 5: no input
+// change — combat readability came from rendering scale and camera zoom.
 
 export function createInput(canvas) {
   const input = {

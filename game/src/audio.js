@@ -4,7 +4,8 @@
 // jingle, and four radio stations that each play their own little
 // generative melody. Everything is created lazily on the first user gesture
 // (browsers block audio before that) and every call is guarded so the game
-// never breaks when audio is unavailable.
+// never breaks when audio is unavailable. Round 5: no audio change — the
+// night combat shot reuses the existing SMG and siren cues as staged.
 
 import { RADIOS } from './config.js';
 

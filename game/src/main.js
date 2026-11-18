@@ -5,7 +5,9 @@
 // update (player, traffic, police, enemies, missions, clock, camera,
 // audio); a staged screenshot (?shot=<name>&seed=<n>) builds one frozen
 // scene, paints it, and sets window.__solmarReady so a screenshot script
-// can capture it. No network is used anywhere.
+// can capture it. No network is used anywhere. Round 5: the staged combat
+// scene now runs at night with a zoom-2.0 camera — still one frozen frame,
+// still flagged ready the same way.
 
 import { VIEW_W, VIEW_H, TIMES_OF_DAY } from './config.js';
 import { makeRng } from './random.js';

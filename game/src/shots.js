@@ -12,9 +12,12 @@
 //       passed re-staged on mission 7 with a $1,800 payout, 2 cars
 //       destroyed, a star row and a LEVEL UP; the cover shows floating
 //       "+$150 NEAR MISS" and "DRIFT x3" score text.
-//  P2 — time-of-day variety (golden hour cover, sunset combat, golden hour
+//  P2 — time-of-day variety (golden hour cover, night combat, golden hour
 //       passed, sunset title); a landmark per shot (plaza fountain, pier,
 //       beach); labelled buildings and pedestrians drawn as people.
+//  Round 5 — combat moves to night (the third mood the top entries show),
+//       camera zoom 2.0 centred between the player and the enemies so the
+//       player, at least two enemies and the fountain edge are all in frame.
 
 import { CARS, RADIOS } from './config.js';
 import { showDialogue, showToast, addFloat } from './state.js';
@@ -128,12 +131,15 @@ export function stageShot(state, city, name, seed) {
     state.player.y = 1520;
     state.player.onFoot = true;
   } else if (name === 'combat') {
-    // S3 combat: sunset ambush in Solmar Plaza, by the fountain. The player
-    // is on foot and drawn large (close camera), three armed enemies are
-    // visible with muzzle flashes and bright tracers, and the banner shows
-    // the kill counter. Parked cars glow with headlights.
-    state.timeOfDay = 'sunset';
-    state.time = 20 * 60 + 8;
+    // S3 combat: NIGHT ambush in Solmar Plaza, by the fountain (round 5:
+    // the third time-of-day mood — golden, sunset, night — matching the
+    // top entries). The player is on foot and drawn large (close camera,
+    // zoom 2.0), three armed enemies are visible with muzzle flashes and
+    // bright tracers, and the banner shows the kill counter. Parked cars
+    // glow with headlights. Camera sits between player and enemies so the
+    // player, two enemies and the fountain edge are all in frame.
+    state.timeOfDay = 'night';
+    state.time = 21 * 60 + 14;
     state.day = 2;
     state.cash = 12400;
     state.wanted = 2;
@@ -150,7 +156,7 @@ export function stageShot(state, city, name, seed) {
     state.player.aimAngle = -Math.PI / 2;
     state.player.weapon = 'smg';
     state.player.ammo.smg = { mag: 24, reserve: 120 };
-    state.camera = { x: 1520, y: 1560, zoom: 1.45 };
+    state.camera = { x: 1520, y: 1570, zoom: 2.0 };
     state.mission.index = 6;
     state.mission.stepsRef = MISSIONS[6].steps;
     state.mission.step = 0;
@@ -160,9 +166,9 @@ export function stageShot(state, city, name, seed) {
     state.mission.stats = { shots: 14, hits: 9, carsDestroyed: 0, carsStolen: 1, time: 63, kills: 1, collected: 0, holdT: 0 };
     const plaza = city.plaza;
     const spots = [
-      { x: plaza.x - 190, y: plaza.y - 150 },
-      { x: plaza.x + 210, y: plaza.y - 120 },
-      { x: plaza.x + 60, y: plaza.y - 170 },
+      { x: plaza.x - 190, y: plaza.y - 80 },
+      { x: plaza.x + 210, y: plaza.y - 60 },
+      { x: plaza.x + 60, y: plaza.y - 70 },
     ];
     for (const s of spots) {
       state.enemies.push({ x: s.x, y: s.y, hp: 60, angle: 0.6, shootT: 0.4, kind: 'gang', alive: true });
@@ -179,12 +185,13 @@ export function stageShot(state, city, name, seed) {
     state.muzzle.push({ x: state.player.x, y: state.player.y - 34, angle: -Math.PI / 2, life: 9 });
     showDialogue(state, 'Marisol Vega', 'They were waiting for you. Stay alive, Marco.', '#ff9ecf');
     // A parked car with headlights on, and fleeing pedestrians as people.
-    const parked = createCar(CARS[4], plaza.x + 330, plaza.y + 130, -0.4, 'traffic');
+    // Round 5: kept inside the tighter zoom-2.0 frame (was off-frame right).
+    const parked = createCar(CARS[4], plaza.x + 260, plaza.y + 130, -0.4, 'traffic');
     parked.speed = 0;
     state.cars.push(parked);
     state.peds.push(
-      { x: plaza.x - 280, y: plaza.y + 180, angle: 2.4, speed: 170, colour: '#ffd94d', shirt: '#f7c948', fleeing: true, waitT: 0 },
-      { x: plaza.x + 280, y: plaza.y + 200, angle: 0.8, speed: 170, colour: '#8aff9e', shirt: '#3da35d', fleeing: true, waitT: 0 },
+      { x: plaza.x - 280, y: plaza.y + 60, angle: 2.4, speed: 170, colour: '#ffd94d', shirt: '#f7c948', fleeing: true, waitT: 0 },
+      { x: plaza.x + 280, y: plaza.y + 60, angle: 0.8, speed: 170, colour: '#8aff9e', shirt: '#3da35d', fleeing: true, waitT: 0 },
     );
   } else if (name === 'passed') {
     // S4 passed: golden-hour mission 7 complete. Richer than round 2: a

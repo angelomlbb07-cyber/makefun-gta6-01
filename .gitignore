@@ -1,4 +1,5 @@
 # SOLMAR — ignored files (rewritten round 4)
+# Round 5: screenshots are committed (they are the entry's evidence), out/ stays ignored.
 # Build output
 out/
 dist/

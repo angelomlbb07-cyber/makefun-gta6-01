@@ -5,6 +5,8 @@
 // damagePlayer, because it is the only place that sets events.wasted. That
 // is the F3 fix: no direct health subtraction anywhere else.
 // Respect levels, cash, wanted level and the floating score texts live here.
+// Round 5: no state change — the kill counter the combat banner shows is
+// the mission stats already tracked here (kills: 1 of 6 in the staged shot).
 
 import { levelForRespect, MAX_WANTED, START_CASH } from './config.js';
 import { clamp } from './random.js';

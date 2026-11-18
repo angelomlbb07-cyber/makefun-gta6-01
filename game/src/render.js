@@ -14,6 +14,10 @@
 //  P2 — time-of-day tint and shadows (golden hour, sunset, night), a
 //       landmark per shot, labelled buildings, pedestrians drawn as
 //       people, and a dense clean HUD in every gameplay shot.
+//  Round 5 — combat reads as combat (bigger on-foot player with a white
+//       ring, bigger enemies, thicker tracers); building labels are never
+//       clipped at a screen edge or hidden under a HUD panel; the
+//       speedometer is not drawn under the passed panel.
 
 import { VIEW_W, VIEW_H, WORLD_W, WORLD_H, ROAD_W, ROADS_V, ROADS_H, SEA_Y, SAND_Y, TIMES_OF_DAY, RADIOS, CARS, clockText, money, starsText, levelForRespect } from './config.js';
 import { districtAt, buildingAt, isRoadAt, isSandAt, isWaterAt } from './city.js';
@@ -70,6 +74,30 @@ function wrapLines(ctx, str, maxW, size, maxLines) {
     s -= 1;
   }
   return { lines, size: s };
+}
+
+// Round 5: HUD panel rectangles a building label must never sit under.
+// A label is skipped when ANY part of its text box overlaps a panel —
+// centre-only checks still left labels half-hidden behind the title menu
+// (S2 "OCEAN VIEW BAR") and the minimap (S4 "PIER ARCADE").
+function labelBlockedByHud(state, sx, sy, lw) {
+  const rects = [
+    [16, 16, 272, 66], // cash panel
+    [16, 122, 272, 30], // radio chip
+    [VIEW_W / 2 - 330, 16, 660, 110], // mission banner + timer line
+    [VIEW_W - 290, 16, 274, 112], // day / clock / district panel
+    [16, 636, 296, 148], // health panel
+    [VIEW_W / 2 - 150, 700, 300, 84], // speedometer
+    [VIEW_W - 226, 634, 210, 150], // minimap
+  ];
+  if (state.dialogue) rects.push([VIEW_W / 2 - 300, 596, 600, 80]);
+  if (state.mode === 'passed') rects.push([VIEW_W / 2 - 310, 96, 620, 600]);
+  if (state.mode === 'title') rects.push([390, 120, 500, 560]);
+  const bx0 = sx - lw / 2;
+  const bx1 = sx + lw / 2;
+  const by0 = sy - 10;
+  const by1 = sy + 6;
+  return rects.some(([x, y, w, h]) => bx0 < x + w && bx1 > x && by0 < y + h && by1 > y);
 }
 
 function worldToScreen(state, x, y) {
@@ -191,7 +219,11 @@ function drawWorld(ctx, state, city) {
     if (z >= 0.55) {
       const labelSize = Math.max(11, Math.round(12 * z));
       const lw = textW(ctx, b.label, labelSize, 800);
-      if (lw < w + 30) {
+      // Round 5: never draw a label that would clip at a screen edge, and
+      // never draw one whose centre sits under a HUD panel (the S1/S2
+      // clipped labels and the S4 minimap/health overlaps came from here).
+      const clipped = s.x - lw / 2 < 8 || s.x + lw / 2 > VIEW_W - 8 || s.y < 12 || s.y > VIEW_H - 12;
+      if (lw < w + 30 && !clipped && !labelBlockedByHud(state, s.x, s.y, lw)) {
         ctx.font = '800 ' + labelSize + 'px ' + FONT;
         ctx.fillStyle = 'rgba(20,20,20,0.85)';
         ctx.textAlign = 'center';
@@ -234,10 +266,11 @@ function drawWorld(ctx, state, city) {
   for (const car of state.cars) drawCar(ctx, state, car);
   // Pedestrians as small visible people, never dots.
   for (const ped of state.peds) drawPerson(ctx, state, ped.x, ped.y, ped.angle, ped.shirt, ped.colour, 1, false);
-  // Gang enemies: bigger, red-shirted, with a gun line.
+  // Gang enemies: bigger, red-shirted, with a gun line. Round 5 raises
+  // the scale so they read as armed people, not dots, at contact-sheet size.
   for (const e of state.enemies) {
     if (!e.alive) continue;
-    drawPerson(ctx, state, e.x, e.y, e.angle, '#c22e2e', '#2a2a2a', 1.15, true);
+    drawPerson(ctx, state, e.x, e.y, e.angle, '#c22e2e', '#2a2a2a', 1.45, true);
     // Health bar over an enemy.
     const s = worldToScreen(state, e.x, e.y);
     ctx.fillStyle = 'rgba(0,0,0,0.6)';
@@ -257,10 +290,12 @@ function drawWorld(ctx, state, city) {
   const p = state.player;
   if (p) {
     if (p.onFoot) {
-      drawPerson(ctx, state, p.x, p.y, p.aimAngle, '#ffd94d', '#20242e', 1.35, true);
+      // Round 5: the player draws larger (1.6) and the ring is white, not
+      // gold, so it reads against the yellow shirt and the muzzle flash.
+      drawPerson(ctx, state, p.x, p.y, p.aimAngle, '#ffd94d', '#20242e', 1.6, true);
       const s = worldToScreen(state, p.x, p.y);
-      ctx.strokeStyle = '#ffd94d';
-      ctx.lineWidth = 3;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 4;
       ctx.beginPath(); ctx.arc(s.x, s.y, 24 * z, 0, Math.PI * 2); ctx.stroke();
     }
     // Waypoint arrow and distance.
@@ -302,15 +337,16 @@ function drawWorld(ctx, state, city) {
     ctx.beginPath(); ctx.arc(0, 0, 7 * z, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   }
-  // Tracers: bright lines that read at contact-sheet scale.
+  // Tracers: bright lines that read at contact-sheet scale. Round 5
+  // thickens them (the round-3 lines were too thin to see at small size).
   for (const b of state.bullets) {
     const a = worldToScreen(state, b.x1, b.y1);
     const c = worldToScreen(state, b.x2, b.y2);
     ctx.strokeStyle = b.enemy ? '#ff7a3d' : '#ffe95a';
-    ctx.lineWidth = 3.5;
+    ctx.lineWidth = 5;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
     ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-    ctx.lineWidth = 1.5;
+    ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c.x, c.y); ctx.stroke();
   }
   // Floating score texts, with a dark outline so they read on sand, sea
@@ -590,7 +626,10 @@ function drawHud(ctx, state, city) {
   barRow(ctx, 30, 732, 268, 'RESPECT LV ' + state.respectLevel, state.respect % 250, 250, '#ffb02e');
   const w = p ? (p.onFoot ? 'ON FOOT' : (p.car ? p.car.def.name.toUpperCase() : 'ON FOOT')) : 'ON FOOT';
   text(ctx, w, 30, 766, 13, '#c8d0dc', 'left', 700);
-  // Bottom-centre: speedometer, car name, nitro, weapon + ammo.
+  // Bottom-centre: speedometer, car name, nitro, weapon + ammo. Round 5:
+  // skipped entirely in passed mode, where the passed panel covers it and
+  // the round-3 shot showed it half-hidden behind that panel.
+  if (state.mode !== 'passed') {
   panel(ctx, VIEW_W / 2 - 150, 700, 300, 84, 'rgba(10,14,22,0.78)');
   const kmh = speedKmh(state);
   text(ctx, kmh + '', VIEW_W / 2 - 130, 756, 40, '#ffffff', 'left', 800);
@@ -607,6 +646,7 @@ function drawHud(ctx, state, city) {
     const slot = p.ammo[p.weapon];
     const ammoText = slot ? wname + '  ' + slot.mag + '/' + slot.reserve : wname;
     text(ctx, ammoText, VIEW_W / 2 + 150 - 14, 776, 14, '#ffd94d', 'right', 800);
+  }
   }
   // Bottom-right: minimap with the SOLMAR label.
   drawMinimap(ctx, state, city);

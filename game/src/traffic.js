@@ -3,7 +3,9 @@
 // walk the sidewalks and flee from gunfire, police and speeding cars.
 // Pedestrians are drawn as small visible people (a body and a head, in a
 // coloured shirt), never as dots — the gap analysis called the dot
-// pedestrians out as one of the flat-look problems.
+// pedestrians out as one of the flat-look problems. Round 5: the two
+// fleeing pedestrians in the combat shot were moved inside the tighter
+// zoom-2.0 frame so they still read as people, not edge clutter.
 
 import { CARS } from './config.js';
 import { range, rangeInt, pick, dist, angleTo, clamp } from './random.js';

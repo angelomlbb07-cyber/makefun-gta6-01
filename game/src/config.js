@@ -83,6 +83,9 @@ export function respectForLevel(level) {
 
 // Time-of-day palettes. The renderer tints the whole scene with these and
 // draws long shadows at golden hour, glow and headlights at sunset/night.
+// Round 5: the night palette carries the new night combat shot — its tint
+// and dark values were checked against that shot so the player, the
+// enemies and the tracers still read under the night overlay.
 export const TIMES_OF_DAY = {
   day: { label: 'DAY', tint: 'rgba(255,255,255,0)', shadow: 0, dark: 0, sky: '#8ec9ee' },
   golden: { label: 'GOLDEN HOUR', tint: 'rgba(255,150,50,0.16)', shadow: 26, dark: 0, sky: '#ffb35c' },

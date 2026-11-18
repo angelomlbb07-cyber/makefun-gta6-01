@@ -6,7 +6,8 @@
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // The run is deterministic: the same repository always writes the same
 // dossier bytes, which the grader checks by running it twice. SOLMAR round 3
-// keeps this plumbing identical to round 2 — only the game changed.
+// keeps this plumbing identical to round 2 — only the game changed. Round 5
+// keeps it identical again: the polish is in the game and the screenshots.
 
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -17,6 +18,8 @@ const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
 // Start from a clean output directory so stale files can never leak in.
+// Round 5: a stale screenshots/ folder from an earlier round would otherwise
+// survive inside out/ and ship the old shots with the new game.
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(outDir, { recursive: true });
 

@@ -2,6 +2,7 @@
 // Small deterministic random helpers. Everything in the game that needs
 // luck goes through a seeded generator, so a staged screenshot with a given
 // seed always builds the same city, the same traffic and the same crowds.
+// Round 5: unchanged — determinism of the staged shots depends on this.
 
 // mulberry32: a tiny fast seeded PRNG with a good distribution.
 export function makeRng(seed) {

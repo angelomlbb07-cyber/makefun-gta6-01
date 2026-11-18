@@ -9,7 +9,9 @@ import { ROADS_V, ROADS_H, ROAD_W, WORLD_W, WORLD_H, SEA_Y, SAND_Y, DISTRICTS } 
 import { makeRng, range, rangeInt, pick, shuffle } from './random.js';
 
 // Names painted on buildings, so the world reads as a city of places, not
-// a grid of boxes. A few per shot are always in frame.
+// a grid of boxes. A few per shot are always in frame. Round 5: render.js
+// now skips any of these labels that would clip at a screen edge or sit
+// under a HUD panel, so the names stay readable instead of half-hidden.
 export const BUILDING_LABELS = [
   'MOTEL SOL', 'PALM MART', 'MARINA BAY BANK', 'CORAL CASINO', 'SOLMARINA GENERAL',
   'SUNSET INN', 'SURF SHOP', "BENNY'S GARAGE", 'DOCKSIDE DINER', 'PALM GROVE HOTEL',
