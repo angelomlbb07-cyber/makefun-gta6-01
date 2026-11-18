@@ -1,176 +1,77 @@
-// SOLMAR — tuning, palette and city constants. One place for every number the game plays by.
-// The city is a grid of blocks separated by roads: 11 columns x 8 rows of 260px blocks with
-// 90px roads between them, so the world is 3940 x 2890 px. The south edge is beach and water,
-// the east edge is the docks. Everything else is derived from these numbers.
-// v2: twelve story missions, guns, a police helicopter, Benny's Garage upgrades, a day
-// system, radio stations, respect and armour, drift and near-miss scoring.
+// SOLMAR configuration: world size, districts, cars, radio, garage, tuning.
+// One job: every number the rest of the game shares lives here.
 
-export const STEP = 1 / 60;
+export const WORLD = { width: 3600, height: 2600, roadGap: 400, blockSize: 280 };
 export const VIEW = { width: 1280, height: 800 };
-export const WORLD = { width: 3940, height: 2890 };
-
-export const BLOCK_W = 260;
-export const BLOCK_H = 260;
-export const ROAD_W = 90;
-export const COLS = 11;
-export const ROWS = 7;
-export const LANE = 22; // how far right of a road centre a car drives
-
-export const SAVE_KEY = 'solmar.save.v1';
-
-// Sun-soaked coastal palette: warm sand, turquoise water, pastel buildings, dark warm roads.
-export const PALETTE = {
-  ground: '#d9b380',
-  sand: '#ecd19a',
-  water: '#2f9db8',
-  waterDeep: '#1f7d99',
-  road: '#4b4640',
-  roadEdge: '#6b6257',
-  lane: '#d8cfae',
-  sidewalk: '#b7a98c',
-  park: '#6fae5e',
-  parkDark: '#5c9a4e',
-  building: ['#e8a87c', '#e8c07c', '#c97b7b', '#7fb8a4', '#d9c9a3', '#b08bb8', '#e39a9a', '#8fb8d9'],
-  roof: ['#c98a5e', '#b8905e', '#a86464', '#5f9a86', '#b8a67e', '#8a6a9a', '#c07a7a', '#6f9ab8'],
-  glass: '#9fd4e8',
-  player: '#f2f2f2',
-  playerShirt: '#e8452c',
-  cop: '#2c4a8a',
-  copCar: '#1f3a6e',
-  taxi: '#f2c230',
-  text: '#f5efe2',
-  muted: '#c9bfa5',
-  gold: '#f2c230',
-  red: '#e8452c',
-  green: '#58b368',
-  dark: '#241f1a',
-  panel: 'rgba(24, 20, 16, 0.78)',
+export const SCREEN = {
+  TITLE: 'title',
+  PLAY: 'play',
+  PAUSE: 'pause',
+  OVER: 'over',
+  GARAGE: 'garage',
+  HOWTO: 'howto',
+  MISSIONS: 'missions',
 };
 
-export const FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif';
-
-// District ground tints so each part of the city reads differently at a glance: Downtown
-// cool grey-blue, Marina Bay teal, Coral Heights warm pink, Old Town ochre, Beachfront sand.
-export const DISTRICT_FILL = {
-  Downtown: '#c2a878', 'Marina Bay': '#cbb37e', 'Coral Heights': '#d3a184',
-  'Old Town': '#cfa96f', Beachfront: '#e0c184', 'The Docks': '#a89a7c', Northside: '#cdb27e',
-};
-export const DISTRICT_FLAVOUR = {
-  Downtown: 'GLASS, GOLD AND BAD DECISIONS', 'Marina Bay': 'YACHTS, MONEY AND TROUBLE',
-  'Coral Heights': 'PALMS, POOLS AND QUIET MONEY', 'Old Town': 'WHERE SOLMAR STARTED',
-  Beachfront: 'SUN, SAND AND FAST CARS', 'The Docks': 'CRATES, CRANES AND NO QUESTIONS',
-  Northside: 'THE QUIET END OF TOWN',
-};
-// Building signs, one per district flavour: the city advertises itself.
-export const SIGNS = ['MOTEL PALMERA', 'TACOS 24H', 'SURF SHOP', 'DONUTS', 'LIQUOR', 'VACANCY',
-  'PIER 9', 'CORAL CASINO', 'PALMERA HOTEL', "BENNY'S GARAGE", 'SEAFOOD', 'HOTEL SOL', 'BAR NEON', 'PAWN SHOP'];
-export function districtAt(col, row) {
-  if (row >= 6) return 'Beachfront';
-  if (col >= 10) return 'The Docks';
-  if (col <= 1 && row >= 4) return 'Marina Bay';
-  if (col >= 5 && col <= 7 && row <= 3) return 'Downtown';
-  if (col >= 8 && row <= 2) return 'Coral Heights';
-  if (row <= 1) return 'Northside';
-  return 'Old Town';
-}
-
-export const STREET_NAMES_H = [
-  'Ocean Front', 'Palmera Ave', 'Sunset Blvd', 'Coral St', 'Harbor Way',
-  'Jacaranda St', 'Marina Drive', 'Palm Court', 'Boardwalk',
-];
-export const STREET_NAMES_V = [
-  'Seawall Rd', 'Gull Ave', 'Anchor St', 'Trade St', 'Bayview Ave', 'Cactus Ln',
-  'Lighthouse Rd', 'Fig St', 'Dockside Rd', 'Pier Ave', 'Breakwater Blvd', 'Coral Way',
+export const DISTRICTS = [
+  { name: 'PALMLINE BEACH', flavour: 'SUN, SAND AND BAD DECISIONS', x0: 0, y0: 2100, x1: 3600, y1: 2600, sand: true },
+  { name: 'CORAL STRIP', flavour: 'BEACHFRONT HOTELS', x0: 0, y0: 1600, x1: 1200, y1: 2100 },
+  { name: 'MARINA DOCKS', flavour: 'CRATES, CRANES AND QUIET DEALS', x0: 0, y0: 0, x1: 800, y1: 800 },
+  { name: 'OLD SOLMAR', flavour: 'NARROW STREETS, OLD MONEY', x0: 1200, y0: 800, x1: 2400, y1: 1600 },
+  { name: 'NEON ROW', flavour: 'NEON, NOISE AND NIGHTLIFE', x0: 2400, y0: 800, x1: 3600, y1: 1600 },
+  { name: 'HILLCREST', flavour: 'BIG HOUSES, BIGGER SECRETS', x0: 800, y0: 0, x1: 3600, y1: 800 },
+  { name: 'CORAL CASINO', flavour: 'THE HOUSE ALWAYS WINS', x0: 1200, y0: 1600, x1: 2400, y1: 2100 },
 ];
 
-// Player on foot.
-export const PLAYER = {
-  radius: 13,
-  walk: 165,
-  run: 245,
-  health: 100,
-  punchRange: 46,
-  punchArc: 1.1,
-  punchDamage: 34,
-  punchCooldown: 0.45,
-};
-
-// Driving.
-export const CAR = {
-  accel: 420,
-  brake: 700,
-  reverse: 220,
-  maxSpeed: 430,
-  maxReverse: 150,
-  turnRate: 2.6,
-  drag: 0.55,
-  handbrakeDrag: 1.4, // strong enough to swing the tail out, light enough that a drift can hold speed
-  radius: 16,
-  hp: 100,
-};
-
-export const TRAFFIC = {
-  cars: 34,
-  parked: 26,
-  peds: 64,
-  cruiseMin: 110,
-  cruiseMax: 175,
-  followGap: 58,
-};
-
-// Wanted: heat 0..100; stars at 10 / 40 / 70. Heat decays when no police can see the player.
-export const WANTED = {
-  starAt: [10, 40, 70],
-  stealCar: 15,
-  punchPed: 10,
-  runOverPed: 25,
-  hitCop: 30,
-  damageCopCar: 8,
-  decay: 2.2,
-  sightRange: 460,
-  copCarsPerStar: 2,
-  maxCopCars: 6,
-  bustSeconds: 1.5,
-};
-
-export const MISSION_REWARDS = [300, 600, 900, 1400, 4000, 1200, 1800, 2200, 5000, 2600, 3200, 6000];
-export const TAXI_FARE = [45, 150];
-export const BUST_FINE = 150;
-export const WASTED_FINE = 100;
-
-// Guns: name, magazine size, reserve ammo, damage, range, fire rate (seconds between shots).
-export const WEAPONS = {
-  pistol: { name: 'PISTOL', mag: 12, reserve: 72, damage: 34, range: 380, rate: 0.28 },
-  smg: { name: 'HORNET SMG', mag: 30, reserve: 120, damage: 22, range: 460, rate: 0.09 },
-};
-// Radio stations and their tracks, cycled while driving.
-export const RADIO = [
-  { name: 'SOL FM 96.4', tracks: ['Sunset Drive', 'Palmera Nights', 'Golden Hour'] },
-  { name: 'CORAL 88.1', tracks: ['Tide Runner', 'Neon Palms', 'Boardwalk Lights'] },
-  { name: 'NEON TIDE 99.1', tracks: ['Midnight Ferry', 'Heat Wave', 'Coastline'] },
-  { name: 'BRISA 88.0', tracks: ['Sea Breeze', 'Old Town Rumba', 'Marina Waltz'] },
+export const CAR_DEFS = [
+  { name: 'Solmar Comet', color: '#e8b23a', topSpeed: 320, accel: 260, grip: 3.2, hp: 100 },
+  { name: 'Coral Cruiser', color: '#3a86d8', topSpeed: 260, accel: 200, grip: 2.8, hp: 120 },
+  { name: 'Neon Runner', color: '#d84a7a', topSpeed: 360, accel: 300, grip: 3.0, hp: 90 },
+  { name: 'Dock Hauler', color: '#7a7f85', topSpeed: 210, accel: 160, grip: 2.4, hp: 180 },
+  { name: 'Sunset Taxi', color: '#f2c230', topSpeed: 280, accel: 220, grip: 2.9, hp: 110 },
 ];
-// Benny's Garage: upgrade name, price per level, max level. Engine raises speed, armour adds
-// car HP, tyres sharpen steering, nitro unlocks a Shift boost.
+
+export const RADIO_STATIONS = [
+  { name: 'SOL FM', freq: '101.1', mood: 'sunny pop', bpm: 112 },
+  { name: 'CORAL 88.1', freq: '88.1', mood: 'late-night jazz', bpm: 84 },
+  { name: '99.1 NEON TIDE', freq: '99.1', mood: 'synthwave drive', bpm: 128 },
+  { name: 'PALM TALK 540', freq: '540 AM', mood: 'talk radio', bpm: 0 },
+];
+
 export const GARAGE_UPGRADES = [
-  { key: 'engine', name: 'Turbo Engine', prices: [800, 1500, 2500], desc: '+12% top speed per level' },
-  { key: 'armour', name: 'Armour Plating', prices: [600, 1100, 1800], desc: '+40 car HP per level' },
-  { key: 'tyres', name: 'Racing Tyres', prices: [500, 900, 1400], desc: 'Sharper steering, better grip' },
-  { key: 'nitro', name: 'Nitro Kit', prices: [1200], desc: 'Hold Shift for a nitro boost' },
+  { id: 'turbo', name: 'Turbo', cost: 800, desc: '+18% top speed' },
+  { id: 'armour', name: 'Armour Plating', cost: 600, desc: '+60 car HP' },
+  { id: 'tyres', name: 'Grip Tyres', cost: 500, desc: 'tighter handling' },
+  { id: 'nitro', name: 'Nitro Kit', cost: 700, desc: 'Shift = nitro boost' },
 ];
-// Car names by kind, shown in the speedometer gauge.
-export const CAR_NAMES = {
-  sedan: ['Azul GT Coupe', 'Solmar Sedan', 'Coral Cruiser'],
-  taxi: ['City Taxi'], van: ['Harbor Van'], sports: ['Sunset GT', 'Veloce RS', 'Hornet S'],
-  truck: ['Dock Hauler'], police: ['PD Interceptor'],
+
+export const WEAPONS = {
+  fists: { name: 'FISTS', damage: 8, rate: 0.35, range: 46, auto: false },
+  pistol: { name: 'PISTOL', damage: 22, rate: 0.28, range: 420, auto: false, mag: 12 },
+  smg: { name: 'SMG', damage: 14, rate: 0.09, range: 380, auto: true, mag: 30 },
 };
-// Drift and near-miss scoring: cash paid for stylish driving. Speeds here are px/s
-// (430 px/s is the top speed, ~193 km/h): a handbrake drift holds ~300 px/s with the
-// throttle down, so the drift floor sits at 180, not 200.
-export const DRIFT = { minSpeed: 180, minTime: 0.4, cashPerSecond: 50 };
-export const NEAR_MISS = { minSpeed: 250, minDist: 34, maxDist: 52, cash: 150, cooldown: 3 };
 
-// Game clock: 1 game minute per 2 real seconds, starting at golden afternoon.
-export const CLOCK = { startMinutes: 16 * 60 + 20, minutesPerSecond: 0.5 };
+export const WANTED = {
+  decayPerSecond: 0.045,
+  copCarSpeed: 300,
+  heliMinStars: 2,
+  roadblockMinStars: 3,
+  bustFine: 150,
+  wastedFine: 100,
+  ramDamage: 14,
+  punchDamage: 8,
+};
 
-export const BEST_KEY = 'solmar.best';
+export const PLAYER_TUNING = {
+  walkSpeed: 190,
+  runSpeed: 260,
+  maxHealth: 100,
+  maxArmour: 100,
+  regenPerSecond: 4,
+  invulnSeconds: 0.8,
+  carEnterRange: 90,
+};
+
+export const START_CASH = 50;
+export const MAX_DAY = 3;
+export const MISSION_COUNT = 12;

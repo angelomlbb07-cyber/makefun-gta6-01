@@ -1,56 +1,94 @@
-// The whole game state in one object, built fresh from a seed: the city, its traffic, the
-// police, the missions, the player, and the camera. Both the live game and the screenshot
-// scenes build their world from here, so a scene is a real game, not a painting.
-// v2 adds the day counter, the radio, Benny's Garage upgrades and the score toasts.
+// SOLMAR game state: one factory builds a fresh world; one job only.
+// Everything the loop, the renderer and the missions share lives here.
 
-import { CLOCK } from './config.js';
-import { buildCity } from './city.js';
-import { createTraffic } from './traffic.js';
-import { createPolice } from './police.js';
-import { createMissions } from './missions.js';
-import { createPlayer } from './player.js';
-import { createRandom, clamp } from './random.js';
+import { SCREEN, START_CASH, MAX_DAY } from './config.js';
 
-export function createGameState(seed) {
-  const rng = createRandom(seed);
-  const city = buildCity(rng);
-  const state = {
-    rng,
-    city,
-    traffic: createTraffic(city, rng),
-    police: createPolice(),
-    missions: createMissions(),
-    player: null,
-    particles: [],
-    events: {},
+export function createState() {
+  return {
+    screen: SCREEN.TITLE,
+    titleChoice: 0,
+    pausedFrom: SCREEN.PLAY,
     time: 0,
-    clockMinutes: CLOCK.startMinutes,
-    day: 1, // DAY 1, 2, 3: the clock wraps at midnight and the story spans three days
-    radio: { station: 0, track: 0, trackTimer: 0 },
-    garage: { open: false, selected: 0, engine: 0, armour: 0, tyres: 0, nitro: 0, nitroMeter: 100 },
-    scoreToast: '', // drift / near-miss bonus line, shown under the cash panel
-    scoreToastTimer: 0,
-    best: 0,
-    camera: { x: 0, y: 0, zoom: 0.85, shakeX: 0, shakeY: 0 },
-    hint: '',
-    streetName: 'Solmar',
+    clockMinutes: 8 * 60 + 12,
+    day: 1,
+    maxDay: MAX_DAY,
+    cash: START_CASH,
+    respect: 0,
+    respectLevel: 1,
+    wanted: 0,
+    heat: 0,
+    camera: { x: 1800, y: 1300 },
+    player: null,
+    cars: [],
+    peds: [],
+    copCars: [],
+    footCops: [],
+    heli: { x: 0, y: 0, active: false, angle: 0 },
+    roadblocks: [],
+    bullets: [],
+    particles: [],
+    floaters: [],
+    missions: {
+      index: 0,
+      step: 0,
+      timer: 0,
+      passed: null,
+      passedTimer: 0,
+      betweenTimer: 0,
+      finished: false,
+      stats: { shots: 0, hits: 0, carsStolen: 0, carsDestroyed: 0, startTime: 0, earned: 0 },
+      toast: '',
+      toastTimer: 0,
+      objective: '',
+    },
+    radio: { station: 0, muted: false },
+    garage: { turbo: false, armour: false, tyres: false, nitro: false },
+    events: { wasted: false, busted: false },
+    overKind: '',
+    overTimer: 0,
+    taxiFare: 0,
+    driftCash: 0,
+    nearMissCash: 0,
+    seed: 20261118,
+    shotMode: null,
+    shotReady: false,
+    saveSlot: null,
+    message: '',
+    messageTimer: 0,
   };
-  state.player = createPlayer(city);
-  state.camera.x = state.player.x;
-  state.camera.y = state.player.y;
-  return state;
 }
 
-/** Rebuild every piece of a state in place, from a fresh seed. */
-export function resetGameState(state, seed) {
-  const fresh = createGameState(seed);
-  for (const key of Object.keys(fresh)) state[key] = fresh[key];
+export function respectForLevel(level) {
+  return (level - 1) * 250;
 }
 
-/** Keep the camera's view inside the world, so no dark band shows past the map edge. */
-export function clampCamera(state) {
-  const hw = 640 / state.camera.zoom;
-  const hh = 400 / state.camera.zoom;
-  state.camera.x = clamp(state.camera.x, hw, state.city.width - hw);
-  state.camera.y = clamp(state.camera.y, hh, state.city.height - hh);
+export function levelFromRespect(respect) {
+  return Math.min(10, 1 + Math.floor(respect / 250));
+}
+
+export function addRespect(state, amount) {
+  state.respect += amount;
+  state.respectLevel = levelFromRespect(state.respect);
+}
+
+export function addCash(state, amount, label) {
+  state.cash += amount;
+  if (label) {
+    state.floaters.push({ x: state.player ? state.player.x : 0, y: state.player ? state.player.y - 30 : 0, text: label, timer: 1.6, color: '#7dff8a' });
+  }
+}
+
+export function setToast(state, text, seconds) {
+  state.missions.toast = text;
+  state.missions.toastTimer = seconds || 4;
+}
+
+export function resetRunFlags(state) {
+  state.events.wasted = false;
+  state.events.busted = false;
+  state.overKind = '';
+  state.overTimer = 0;
+  state.missions.passed = null;
+  state.missions.passedTimer = 0;
+  state.missions.betweenTimer = 0;
 }

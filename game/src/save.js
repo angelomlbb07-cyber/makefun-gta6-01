@@ -1,47 +1,44 @@
-// Saving: the player's progress lives in localStorage, this browser only. A save holds cash,
-// the mission reached, where the player stands, the time of day and the best cash earned,
-// plus the garage upgrades, the guns and the respect earned so far.
+// SOLMAR save: localStorage autosave after each mission, with validation.
+// F8 fix: a save whose mission index is out of range (or not an integer)
+// is rejected — loadGame returns null instead of crashing Continue.
 
-import { SAVE_KEY } from './config.js';
+const SAVE_KEY = 'solmar-save-v1';
 
 export function saveGame(state) {
   try {
     const data = {
-      cash: Math.floor(state.player.cash),
+      version: 1,
+      cash: Math.floor(state.cash),
+      respect: Math.floor(state.respect),
       missionIndex: state.missions.index,
-      x: Math.round(state.player.x),
-      y: Math.round(state.player.y),
-      minutes: Math.floor(state.clockMinutes),
-      best: Math.floor(state.best),
       day: state.day,
-      respect: Math.floor(state.player.respect || 0),
-      armour: Math.floor(state.player.armour || 0),
-      weapon: state.player.weapon,
-      ammoPistol: state.player.ammoPistol,
-      reservePistol: state.player.reservePistol,
-      ammoSmg: state.player.ammoSmg,
-      reserveSmg: state.player.reserveSmg,
-      garage: {
-        engine: state.garage.engine, armour: state.garage.armour,
-        tyres: state.garage.tyres, nitro: state.garage.nitro,
-      },
+      garage: state.garage,
+      playerX: Math.floor(state.player.x),
+      playerY: Math.floor(state.player.y),
+      health: Math.floor(state.player.health),
       savedAt: Date.now(),
     };
-    window.localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    state.saveSlot = data;
     return true;
-  } catch {
+  } catch (e) {
     return false;
   }
 }
 
 export function loadGame() {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(SAVE_KEY);
     if (!raw) return null;
     const data = JSON.parse(raw);
-    if (typeof data.cash !== 'number' || typeof data.missionIndex !== 'number') return null;
+    if (typeof data !== 'object' || data === null) return null;
+    if (typeof data.cash !== 'number' || !Number.isFinite(data.cash)) return null;
+    // F8: mission index must be a valid integer inside the story range.
+    if (!Number.isInteger(data.missionIndex) || data.missionIndex < 0 || data.missionIndex > 12) return null;
+    if (typeof data.respect !== 'number' || !Number.isFinite(data.respect)) return null;
+    if (data.day !== undefined && (!Number.isInteger(data.day) || data.day < 1 || data.day > 3)) return null;
     return data;
-  } catch {
+  } catch (e) {
     return null;
   }
 }
@@ -51,9 +48,5 @@ export function hasSave() {
 }
 
 export function clearSave() {
-  try {
-    window.localStorage.removeItem(SAVE_KEY);
-  } catch {
-    // Storage can be off: nothing to clear.
-  }
+  try { localStorage.removeItem(SAVE_KEY); } catch (e) {}
 }

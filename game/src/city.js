@@ -1,232 +1,144 @@
-// SOLMAR, the city itself: a road grid, blocks with buildings, parks, the beach and the docks,
-// landmarks the missions use, and the road graph cars and police pathfind on.
-// Blocks are 260px, roads 90px, 11 columns x 7 rows. South of the last road is sand, then water.
+// SOLMAR city: streets, districts, beach and sea, landmarks, pathfinding.
+// The city is a road grid; the south edge is sand and sea, the west is docks.
 
-import { BLOCK_H, BLOCK_W, COLS, DISTRICT_FILL, districtAt, PALETTE, ROAD_W, ROWS, SIGNS, STREET_NAMES_H, STREET_NAMES_V, WORLD } from './config.js';
-import { clamp } from './random.js';
+import { WORLD, DISTRICTS } from './config.js';
+import { clamp, mulberry32 } from './random.js';
 
-export const WATER_Y = 2740; // south of here is the sea; nothing drives or walks in it
-export const SAND_Y = 2540; // south of here is sand
+export const LANDMARKS = [
+  { id: 'safehouse', name: 'Marco\u2019s Safehouse', x: 1500, y: 1150 },
+  { id: 'garage', name: 'Benny\u2019s Garage', x: 2100, y: 1250 },
+  { id: 'casino', name: 'Coral Casino', x: 1800, y: 1850 },
+  { id: 'docks', name: 'Marina Docks', x: 420, y: 420 },
+  { id: 'beach', name: 'Palmline Beach', x: 1800, y: 2320 },
+  { id: 'hospital', name: 'Solmar General', x: 2600, y: 500 },
+  { id: 'neon', name: 'Neon Row', x: 3000, y: 1200 },
+  { id: 'pier', name: 'Sunset Pier', x: 900, y: 2380 },
+  { id: 'airport', name: 'Solmar Airfield', x: 3200, y: 300 },
+  { id: 'market', name: 'Old Market', x: 1500, y: 700 },
+];
 
-export function buildCity(rng) {
-  const vRoads = [];
-  const hRoads = [];
-  for (let i = 0; i <= COLS; i += 1) vRoads.push(i * (BLOCK_W + ROAD_W) + ROAD_W / 2);
-  for (let j = 0; j <= ROWS; j += 1) hRoads.push(j * (BLOCK_H + ROAD_W) + ROAD_W / 2);
-
-  const blocks = [];
-  const buildings = [];
-  const trees = [];
-  const props = []; // beach umbrellas, the lifeguard tower, the hotel pool: props that make a district read
-  const parks = new Set(['2,2', '8,5', '4,6']);
-  for (let col = 0; col < COLS; col += 1) {
-    for (let row = 0; row < ROWS; row += 1) {
-      const x0 = col * (BLOCK_W + ROAD_W) + ROAD_W;
-      const y0 = row * (BLOCK_H + ROAD_W) + ROAD_W;
-      const key = `${col},${row}`;
-      const district = districtAt(col, row);
-      let type = 'buildings';
-      if (parks.has(key)) type = 'park';
-      else if (col >= 10 && row >= 2 && row <= 4) type = 'docks';
-      else if (district === 'Coral Heights') type = 'houses';
-      const block = { col, row, x: x0, y: y0, w: BLOCK_W, h: BLOCK_H, type, district, buildings: [], trees: [] };
-      if (type === 'park') {
-        for (let t = 0; t < rng.int(7, 11); t += 1) {
-          const tree = { x: x0 + rng.range(24, BLOCK_W - 24), y: y0 + rng.range(24, BLOCK_H - 24), r: rng.range(10, 16) };
-          block.trees.push(tree);
-          trees.push(tree);
-        }
-      } else {
-        const downtown = district === 'Downtown';
-        const count = type === 'houses' ? rng.int(1, 2) : type === 'docks' ? rng.int(2, 3) : rng.int(2, 4);
-        const colorBase = rng.int(0, PALETTE.building.length);
-        for (let b = 0; b < count; b += 1) {
-          const bw = type === 'houses' ? rng.range(70, 110) : rng.range(60, 130);
-          const bh = type === 'houses' ? rng.range(60, 100) : rng.range(60, 130);
-          const bx = x0 + rng.range(14, BLOCK_W - 14 - bw);
-          const by = y0 + rng.range(14, BLOCK_H - 14 - bh);
-          const ci = (colorBase + b) % PALETTE.building.length;
-          const building = {
-            x: bx, y: by, w: bw, h: bh,
-            height: downtown ? 3 : type === 'houses' ? 1 : rng.int(1, 2),
-            color: type === 'docks' ? '#8a7a5e' : PALETTE.building[ci],
-            roof: type === 'docks' ? '#6b5f49' : PALETTE.roof[ci],
-            // One in three buildings advertises: the sign is drawn on its roof.
-            sign: rng.chance(0.34) ? rng.pick(SIGNS) : null,
-            district,
-          };
-          block.buildings.push(building);
-          buildings.push(building);
-        }
-        if (type === 'docks') {
-          for (let t = 0; t < 3; t += 1) {
-            block.trees.push({ x: x0 + rng.range(20, BLOCK_W - 20), y: y0 + rng.range(20, BLOCK_H - 20), r: 8, container: true });
-          }
-        }
-      }
-      blocks.push(block);
-    }
-  }
-
-  // Palms along the sand.
-  for (let x = 120; x < WORLD.width - 100; x += rng.range(90, 170)) {
-    trees.push({ x, y: rng.range(SAND_Y + 30, WATER_Y - 40), r: rng.range(11, 15), palm: true });
-  }
-
-  // Beach props: umbrellas in a row along the sand, a lifeguard tower, and the hotel pool
-  // in the Beachfront block (col 8, row 6) so the cover shot reads as a beach at a glance.
-  const umbrellaColors = ['#e8452c', '#f2c230', '#3d7bd9', '#3d9e6a', '#e8903d'];
-  for (let x = 300; x < WORLD.width - 200; x += 260) {
-    props.push({ kind: 'umbrella', x: x + rng.range(-30, 30), y: SAND_Y + rng.range(45, 120), color: rng.pick(umbrellaColors) });
-  }
-  props.push({ kind: 'tower', x: 1970, y: SAND_Y + 90 });
-  props.push({ kind: 'pool', x: 8 * (BLOCK_W + ROAD_W) + ROAD_W + 40, y: 6 * (BLOCK_H + ROAD_W) + ROAD_W + 40, w: 180, h: 90 });
-
-  // Landmarks: points on the road network the missions and the story use.
-  const at = (i, j) => ({ x: vRoads[i], y: hRoads[j] });
-  const landmarks = {
-    garage: { ...at(5, 5), name: "Rico's Garage", kind: 'garage' },
-    hotel: { ...at(6, 2), name: 'The Palmera Hotel', kind: 'hotel' },
-    restaurant: { ...at(1, 7), name: 'Marina Restaurant', kind: 'restaurant' },
-    safehouse: { ...at(1, 5), name: 'Safehouse', kind: 'safehouse' },
-    docks: { ...at(10, 3), name: 'Dock 9', kind: 'docks' },
-    warehouse: { ...at(9, 1), name: 'Warehouse 12', kind: 'warehouse' },
-    casino: { ...at(6, 3), name: 'Coral Casino', kind: 'casino' },
-    boat: { x: 745, y: 2690, name: 'The Boat', kind: 'boat' },
-    hospital: { ...at(3, 2), name: 'Solmar General', kind: 'hospital' },
-    police: { ...at(4, 2), name: 'Solmar PD', kind: 'police' },
-    spawn: { ...at(5, 6), name: 'Start', kind: 'spawn' },
-  };
-
-  return { vRoads, hRoads, blocks, buildings, trees, props, landmarks, width: WORLD.width, height: WORLD.height };
+export function landmark(id) {
+  return LANDMARKS.find((l) => l.id === id) || LANDMARKS[0];
 }
 
-/** The intersection nearest a point, as {i, j, x, y}. */
-export function nearestIntersection(city, x, y) {
-  let bi = 0;
-  let bj = 0;
-  let best = Infinity;
-  for (let i = 0; i < city.vRoads.length; i += 1) {
-    for (let j = 0; j < city.hRoads.length; j += 1) {
-      const d = (city.vRoads[i] - x) ** 2 + (city.hRoads[j] - y) ** 2;
-      if (d < best) {
-        best = d;
-        bi = i;
-        bj = j;
-      }
-    }
+export function districtAt(x, y) {
+  for (const d of DISTRICTS) {
+    if (x >= d.x0 && x < d.x1 && y >= d.y0 && y < d.y1) return d;
   }
-  return { i: bi, j: bj, x: city.vRoads[bi], y: city.hRoads[bj] };
+  return DISTRICTS[3];
 }
 
-/** Breadth-first path over intersections, from near (sx, sy) to near (tx, ty). */
-export function findPath(city, sx, sy, tx, ty) {
-  const from = nearestIntersection(city, sx, sy);
-  const to = nearestIntersection(city, tx, ty);
-  const cols = city.vRoads.length;
-  const rows = city.hRoads.length;
-  const key = (i, j) => j * cols + i;
+export function isSea(x, y) {
+  return y > WORLD.height - 260;
+}
+
+export function isSand(x, y) {
+  return y > WORLD.height - 420 && y <= WORLD.height - 260;
+}
+
+export function isRoad(x, y) {
+  const gx = x % WORLD.roadGap;
+  const gy = y % WORLD.roadGap;
+  return gx < 120 || gx > WORLD.roadGap - 120 || gy < 120 || gy > WORLD.roadGap - 120;
+}
+
+export function nearestRoadPoint(x, y) {
+  const gx = Math.round(x / WORLD.roadGap) * WORLD.roadGap;
+  const gy = Math.round(y / WORLD.roadGap) * WORLD.roadGap;
+  const dx = Math.abs(x - gx);
+  const dy = Math.abs(y - gy);
+  if (dx < dy) return { x: gx, y };
+  return { x, y: gy };
+}
+
+export function roadGridPoints() {
+  const pts = [];
+  for (let x = 0; x <= WORLD.width; x += WORLD.roadGap) {
+    for (let y = 0; y <= WORLD.height; y += WORLD.roadGap) {
+      pts.push({ x, y });
+    }
+  }
+  return pts;
+}
+
+// Breadth-first path over the road grid; always returns at least one point.
+export function findPath(sx, sy, tx, ty) {
+  const cols = Math.floor(WORLD.width / WORLD.roadGap) + 1;
+  const rows = Math.floor(WORLD.height / WORLD.roadGap) + 1;
+  const sc = clamp(Math.round(sx / WORLD.roadGap), 0, cols - 1);
+  const sr = clamp(Math.round(sy / WORLD.roadGap), 0, rows - 1);
+  const tc = clamp(Math.round(tx / WORLD.roadGap), 0, cols - 1);
+  const tr = clamp(Math.round(ty / WORLD.roadGap), 0, rows - 1);
+  const key = (c, r) => r * cols + c;
   const prev = new Map();
-  const queue = [key(from.i, from.j)];
-  prev.set(key(from.i, from.j), -1);
-  while (queue.length > 0) {
-    const cur = queue.shift();
-    const ci = cur % cols;
-    const cj = Math.floor(cur / cols);
-    if (ci === to.i && cj === to.j) break;
-    for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const ni = ci + di;
-      const nj = cj + dj;
-      if (ni < 0 || ni >= cols || nj < 0 || nj >= rows) continue;
-      const nk = key(ni, nj);
-      if (!prev.has(nk)) {
-        prev.set(nk, cur);
-        queue.push(nk);
-      }
+  const seen = new Set([key(sc, sr)]);
+  const queue = [[sc, sr]];
+  while (queue.length) {
+    const [c, r] = queue.shift();
+    if (c === tc && r === tr) break;
+    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nc = c + dc, nr = r + dr;
+      if (nc < 0 || nr < 0 || nc >= cols || nr >= rows) continue;
+      const k = key(nc, nr);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      prev.set(k, key(c, r));
+      queue.push([nc, nr]);
     }
   }
   const path = [];
-  let cur = key(to.i, to.j);
-  if (!prev.has(cur)) return [{ x: to.x, y: to.y }];
-  while (cur !== -1) {
-    path.unshift({ x: city.vRoads[cur % cols], y: city.hRoads[Math.floor(cur / cols)] });
-    cur = prev.get(cur);
+  let k = key(tc, tr);
+  if (!prev.has(k) && !(tc === sc && tr === sr)) {
+    return [{ x: tx, y: ty }];
   }
-  return path;
+  while (k !== key(sc, sr)) {
+    const c = k % cols, r = Math.floor(k / cols);
+    path.unshift({ x: c * WORLD.roadGap, y: r * WORLD.roadGap });
+    k = prev.get(k);
+    if (k === undefined) break;
+  }
+  path.push({ x: tx, y: ty });
+  return path.length ? path : [{ x: tx, y: ty }];
 }
 
-/** Which road a point is on, if any: {axis: 'h'|'v', index, center, name}. */
-export function roadAt(city, x, y) {
-  for (let j = 0; j < city.hRoads.length; j += 1) {
-    if (Math.abs(y - city.hRoads[j]) <= ROAD_W / 2) {
-      return { axis: 'h', index: j, center: city.hRoads[j], name: STREET_NAMES_H[j] };
+export function palmPositions(seed) {
+  const rng = mulberry32(seed);
+  const palms = [];
+  for (let i = 0; i < 90; i++) {
+    palms.push({
+      x: rng() * WORLD.width,
+      y: WORLD.height - 420 + rng() * 380,
+      lean: (rng() - 0.5) * 0.6,
+      size: 14 + rng() * 12,
+    });
+  }
+  for (let i = 0; i < 40; i++) {
+    palms.push({
+      x: rng() * WORLD.width,
+      y: rng() * (WORLD.height - 500),
+      lean: (rng() - 0.5) * 0.4,
+      size: 12 + rng() * 10,
+    });
+  }
+  return palms;
+}
+
+export function buildingRects(seed) {
+  const rng = mulberry32(seed + 7);
+  const rects = [];
+  for (let bx = 0; bx < 9; bx++) {
+    for (let by = 0; by < 6; by++) {
+      const x0 = bx * WORLD.roadGap + 140;
+      const y0 = by * WORLD.roadGap + 140;
+      if (y0 > WORLD.height - 500) continue;
+      if (rng() < 0.25) continue;
+      rects.push({
+        x: x0 + rng() * 60, y: y0 + rng() * 60,
+        w: 60 + rng() * 120, h: 50 + rng() * 110,
+        color: ['#c9a06a', '#b98a5e', '#8fa3b8', '#d8c49a', '#a8b8a0'][Math.floor(rng() * 5)],
+        roof: rng() < 0.3,
+      });
     }
   }
-  for (let i = 0; i < city.vRoads.length; i += 1) {
-    if (Math.abs(x - city.vRoads[i]) <= ROAD_W / 2) {
-      return { axis: 'v', index: i, center: city.vRoads[i], name: STREET_NAMES_V[i] };
-    }
-  }
-  return null;
-}
-
-/** The building a circle overlaps, or null. */
-export function hitBuilding(city, x, y, r) {
-  for (let index = 0; index < city.buildings.length; index += 1) {
-    const b = city.buildings[index];
-    if (x + r > b.x && x - r < b.x + b.w && y + r > b.y && y - r < b.y + b.h) return b;
-  }
-  return null;
-}
-
-/** True when a circle is inside the sea. */
-export function inWater(x, y, r) {
-  return y + r > WATER_Y;
-}
-
-/** Push a circle out of buildings and the sea; returns the building hit, if any. */
-export function collideCircle(city, pos, r) {
-  let hit = null;
-  const b = hitBuilding(city, pos.x, pos.y, r);
-  if (b) {
-    hit = b;
-    const left = pos.x + r - b.x;
-    const right = b.x + b.w - (pos.x - r);
-    const top = pos.y + r - b.y;
-    const bottom = b.y + b.h - (pos.y - r);
-    const min = Math.min(left, right, top, bottom);
-    if (min === left) pos.x = b.x - r;
-    else if (min === right) pos.x = b.x + b.w + r;
-    else if (min === top) pos.y = b.y - r;
-    else pos.y = b.y + b.h + r;
-  }
-  if (pos.y + r > WATER_Y) pos.y = WATER_Y - r;
-  if (pos.y - r < 0) pos.y = r;
-  if (pos.x - r < 0) pos.x = r;
-  if (pos.x + r > city.width) pos.x = city.width - r;
-  return hit;
-}
-
-/** A point on a road, away from intersections, good for spawning a parked car. */
-export function randomRoadPoint(city, rng) {
-  if (rng.chance(0.5)) {
-    const j = rng.int(0, city.hRoads.length - 1);
-    const i = rng.int(0, city.vRoads.length - 2);
-    return { x: (city.vRoads[i] + city.vRoads[i + 1]) / 2, y: city.hRoads[j] + (rng.chance(0.5) ? 26 : -26), angle: rng.chance(0.5) ? 0 : Math.PI };
-  }
-  const i = rng.int(0, city.vRoads.length - 1);
-  const j = rng.int(0, city.hRoads.length - 2);
-  return { x: city.vRoads[i] + (rng.chance(0.5) ? 26 : -26), y: (city.hRoads[j] + city.hRoads[j + 1]) / 2, angle: rng.chance(0.5) ? Math.PI / 2 : -Math.PI / 2 };
-}
-
-export function blockAt(city, x, y) {
-  for (let index = 0; index < city.blocks.length; index += 1) {
-    const b = city.blocks[index];
-    if (x >= b.x && x < b.x + b.w && y >= b.y && y < b.y + b.h) return b;
-  }
-  return null;
-}
-
-export function clampToWorld(city, x, y) {
-  return { x: clamp(x, 0, city.width), y: clamp(y, 0, city.height) };
+  return rects;
 }

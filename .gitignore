@@ -1,5 +1,3 @@
 out/
-# Local tooling and editor noise: never part of the entry.
 node_modules/
 .DS_Store
-*.local

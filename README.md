@@ -1,19 +1,71 @@
-# makefun-gta6-01
+# SOLMAR
 
-[![make.fun · gta6-01](https://make.fun/badge/gta6-01.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![rank](https://make.fun/badge/gta6-01/angelomlbb07-cyber/makefun-gta6-01/rank.svg)](https://make.fun/bounty/gta6-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
-[![reward](https://make.fun/badge/gta6-01/angelomlbb07-cyber/makefun-gta6-01/reward.svg)](https://make.fun/bounty/gta6-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-01)
+[![make.fun](https://make.fun/badge/competition/gta6-01)](https://make.fun/bounty/gta6-01)
+[![make.fun](https://make.fun/badge/entry/gta6-01)](https://make.fun/bounty/gta6-01)
+[![make.fun](https://make.fun/badge/leaderboard/gta6-01)](https://make.fun/bounty/gta6-01)
 
-SOLMAR — a 2D top-down open-world crime game set in the sun-soaked coastal city of Solmar. Play as Marco Solis: steal and drive cars through traffic, outrun the police as your wanted level rises, and work 12 story missions for fixer Marisol Vega. Guns with ammo, a police helicopter at 2+ stars, Benny's Garage upgrades (Turbo, Armour, Tyres, Nitro), a day/night cycle, radio stations, drift and near-miss scoring, a live minimap, and autosave. No build step, no network requests — just static files and synthesized WebAudio. Built by an AI agent for make.fun's "Make GTA 6" bounty.
+An original 2D top-down open-world crime game for the make.fun **gta6-01**
+bounty ("Make GTA 6"). No Rockstar material anywhere: our own city, names,
+story, art, sounds and music.
 
-## Run it
+## The game
+
+Play as **Marco Solis** in the sun-soaked coastal city of **Solmar**. Work
+12 story missions for fixer **Marisol Vega**, steal cars, outrun the police
+as the wanted level rises, and own the city.
+
+- **Open world**: streets grid, Palmline Beach with sea and palms, Marina
+  Docks, Neon Row, Old Solmar, Hillcrest — on foot and by car.
+- **Traffic and pedestrians** (pedestrians flee gunfire and the police).
+- **Cars to steal and drive**: driver bails, car HP, handbrake drifts,
+  nitro, taxi fares.
+- **Wanted level**: police cars that pathfind and ram, foot cops that chase,
+  punch and bust, roadblocks at 3 stars, a police helicopter with a
+  searchlight at 2+ stars, heat that decays when you lay low.
+- **12 story missions** with a visible counter, mission timer, briefing
+  toasts, and a mission-passed screen with payout and stats (time, accuracy,
+  cars destroyed/stolen, rating).
+- **Combat**: fists, pistol and SMG with ammo, muzzle flash and tracers.
+- **HUD with a live minimap**: cash, wanted stars, health, armour, respect
+  level, clock, district label and flavour line, objective banner,
+  speedometer with car name, waypoint arrow and distance, radio station.
+- **Start screen and saving**: title menu (New Game / Continue / How to
+  Play / Missions), pause, BUSTED/WASTED screens, localStorage autosave
+  after each mission.
+- **Progression**: mission payouts, drift and near-miss cash, Benny's Garage
+  upgrades (Turbo, Armour, Tyres, Nitro), day 1–3, respect levels, 4 radio
+  stations.
+- **Sound**: synthesized WebAudio only — engine, sirens, gunshots, radio
+  music. No audio files, no network requests.
+
+## Controls
+
+WASD / arrows — drive or walk · E — enter a car / hold to crack a safe ·
+F — shoot or punch · Q — switch weapon · R — reload · Shift — nitro ·
+Space — handbrake · C — change radio · P — pause · M — mute.
+
+## Play it
 
 ```sh
 node serve.ts
+# open http://localhost:8080
 ```
 
-Then open http://localhost:8080 in desktop Chrome.
+Static files under `game/`, no build step, no network requests. The entry
+program is `main.ts` (Node 22, standard library only).
 
----
+## Layout
 
-<sub>Entered on [make.fun](https://make.fun/?utm_source=github&utm_medium=readme&utm_campaign=gta6-01) · AI agents build software for cash rewards</sub>
+- `game/src/` — 14 modules, one job each: `config`, `random`, `state`,
+  `city`, `audio`, `input`, `player`, `traffic`, `police`, `missions`,
+  `save`, `render`, `shots`, `main`.
+- `game/index.html` — the page that loads the game.
+- `screenshots/` — 4 screenshots of the game itself: beach chase (cover),
+  title menu, on-foot combat, mission passed.
+- `main.ts` — builds `/output` (game + screenshots + dossier.json).
+- `serve.ts` — local static server for development.
+- `vendor/makefun-game.ts` — the kit's dossier library, unchanged.
+
+## License
+
+MIT — see `LICENSE`.
