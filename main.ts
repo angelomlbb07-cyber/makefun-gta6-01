@@ -1,16 +1,18 @@
-// SOLMAR — main.ts (Node 22, standard library only)
-// The program that hands the entry in: it copies game/ and screenshots/
-// from beside this file into the output directory and writes
-// /output/dossier.json with buildDossier from the vendored make.fun
-// library. Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
+// SOLMAR entrypoint — hands the game in to make.fun.
+//
+// This program runs on Node 22 with the standard library only. It takes
+// the game/ and screenshots/ folders that sit beside this file, copies
+// them into the output directory, and writes dossier.json there using
+// the vendored make.fun library. Outside the grader, the environment
+// variable MAKEFUN_OUTPUT_DIR stands in for /output:
+//
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
-// The run is deterministic: the same repository always writes the same
-// dossier bytes, which the grader checks by running it twice. SOLMAR round 3
-// keeps this plumbing identical to round 2 — only the game changed. Round 6
-// is a full fresh rewrite in one recording: the plumbing stays identical to
-// round 5, only the game and the screenshots were rewritten.
+//
+// The two runs the grader performs must produce identical bytes, so this
+// program does no timestamping, no randomness and no network access —
+// it only copies files and lets buildDossier summarise them.
 
-import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-game.ts';
@@ -18,28 +20,22 @@ import { buildDossier } from './vendor/makefun-game.ts';
 const repoRoot = fileURLToPath(new URL('.', import.meta.url));
 const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-// Start from a clean output directory so stale files can never leak in.
-// Round 5: a stale screenshots/ folder from an earlier round would otherwise
-// survive inside out/ and ship the old shots with the new game.
-rmSync(outDir, { recursive: true, force: true });
-mkdirSync(outDir, { recursive: true });
-
-cpSync(join(repoRoot, 'game'), join(outDir, 'game'), { recursive: true });
-mkdirSync(join(outDir, 'screenshots'), { recursive: true });
-if (existsSync(join(repoRoot, 'screenshots'))) {
-  cpSync(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
+function copyTree(from, to) {
+  mkdirSync(to, { recursive: true });
+  cpSync(from, to, { recursive: true });
 }
 
-// The scorer's own caps: only text_max_bytes shapes the dossier bytes; the
-// others refuse an entry the scorer would refuse (more than 4 screenshots
-// or one over 256 KiB; more than 993 files in game/ or 48 MiB of game
-// files in all, or a path under game/ over 1000 bytes).
-const dossier = buildDossier(outDir, {
+mkdirSync(outDir, { recursive: true });
+copyTree(join(repoRoot, 'game'), join(outDir, 'game'));
+copyTree(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'));
+
+const dossierOptions = {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   game_max_files: 993,
   game_max_bytes: 50331648,
   game_path_max_bytes: 1000,
-});
+};
 
+const dossier = buildDossier(outDir, dossierOptions);
 writeFileSync(join(outDir, 'dossier.json'), dossier);

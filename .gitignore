@@ -1,29 +1,4 @@
-# SOLMAR — ignored files (rewritten round 6: full fresh rewrite in one recording)
-# Round 6: screenshots are committed (they are the entry's evidence), out/ stays ignored.
-# Build output
-out/
-dist/
-build/
-*.tsbuildinfo
-
-# Dependencies and caches
 node_modules/
-.npm/
-.yarn/
-.pnpm-store/
-
-# Editor and IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
+out/
 .DS_Store
-Thumbs.db
-
-# Logs and temp files
 *.log
-*.tmp
-*.temp
-.cache/
-coverage/
