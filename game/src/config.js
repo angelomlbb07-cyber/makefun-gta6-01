@@ -4,6 +4,7 @@
 // The city is Solmar: a sun-soaked coastal city, 3200 by 2400 world units,
 // streets on a grid, beach and sea along the south edge, docks in the west,
 // a plaza with a fountain near the middle, and a casino district.
+// Round 6: full fresh rewrite in one recording; values carried over from round 5.
 
 export const VIEW_W = 1280;
 export const VIEW_H = 800;
@@ -83,7 +84,7 @@ export function respectForLevel(level) {
 
 // Time-of-day palettes. The renderer tints the whole scene with these and
 // draws long shadows at golden hour, glow and headlights at sunset/night.
-// Round 5: the night palette carries the new night combat shot — its tint
+// Round 6: the night palette carries the night combat shot — its tint
 // and dark values were checked against that shot so the player, the
 // enemies and the tracers still read under the night overlay.
 export const TIMES_OF_DAY = {

@@ -9,8 +9,9 @@
 //       instead of indexing past the end of the list and throwing.
 // A mission step is one of: goto (reach a point), deliver (reach it in a
 // car), kill (take out N enemies), collect (grab N packages), hold (stay in
-// a zone), escape (reach the safehouse while the heat is on). Round 5: no
-// mission change — the combat shot re-stages mission 7's kill step only.
+// a zone), escape (reach the safehouse while the heat is on). Round 6: full
+// fresh rewrite in one recording — no mission change; the combat shot
+// re-stages mission 7's kill step only.
 
 import { MISSION_COUNT } from './config.js';
 import { addCash, addRespect, showDialogue, showToast } from './state.js';

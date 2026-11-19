@@ -14,8 +14,9 @@
 //  P2 — time-of-day tint and shadows (golden hour, sunset, night), a
 //       landmark per shot, labelled buildings, pedestrians drawn as
 //       people, and a dense clean HUD in every gameplay shot.
-//  Round 5 — combat reads as combat (bigger on-foot player with a white
-//       ring, bigger enemies, thicker tracers); building labels are never
+//  Round 6 — full fresh rewrite in one recording; carries over round 5:
+//       combat reads as combat (bigger on-foot player with a white ring,
+//       bigger enemies, thicker tracers); building labels are never
 //       clipped at a screen edge or hidden under a HUD panel; the
 //       speedometer is not drawn under the passed panel.
 

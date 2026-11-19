@@ -1,1 +1,22 @@
-[{"name":"1-beach.jpg","query":"?shot=beach&seed=1"},{"name":"2-title.jpg","query":"?shot=title&seed=1"},{"name":"3-combat.jpg","query":"?shot=combat&seed=1"},{"name":"4-passed.jpg","query":"?shot=passed&seed=1"}]
+[
+  {
+    "label": "Golden-hour beach chase",
+    "name": "1-beach.jpg",
+    "query": "?shot=beach&seed=1"
+  },
+  {
+    "label": "Title menu",
+    "name": "2-title.jpg",
+    "query": "?shot=title&seed=1"
+  },
+  {
+    "label": "Night combat",
+    "name": "3-combat.jpg",
+    "query": "?shot=combat&seed=1"
+  },
+  {
+    "label": "Mission passed",
+    "name": "4-passed.jpg",
+    "query": "?shot=passed&seed=1"
+  }
+]

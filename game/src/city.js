@@ -4,6 +4,7 @@
 // buildCity is deterministic for a seed, so staged screenshots are stable.
 // This module only answers questions about the city (is this a road? which
 // district? is there a building here?) — drawing lives in render.js.
+// Round 6: full fresh rewrite in one recording; layout carried over from round 5.
 
 import { ROADS_V, ROADS_H, ROAD_W, WORLD_W, WORLD_H, SEA_Y, SAND_Y, DISTRICTS } from './config.js';
 import { makeRng, range, rangeInt, pick, shuffle } from './random.js';

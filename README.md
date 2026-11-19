@@ -6,7 +6,7 @@
 
 SOLMAR is an original 2D top-down open-world crime game set in the sun-soaked coastal city of Solmar. Play as Marco Solis: steal cars, outrun the police as the wanted level rises, and finish 12 story missions for fixer Marisol Vega across golden-hour beaches, a plaza fountain, the casino district and the pier.
 
-Round 5 polish: on-foot combat now reads at a glance (larger player and enemies, white player ring, thicker tracers, night plaza ambush at zoom 2.0), building labels never clip at a screen edge or hide under a HUD panel, and the speedometer no longer shows half-hidden behind the mission-passed panel. Three times of day across the four screenshots: golden hour, sunset, night.
+Round 6 rebuild: a full fresh rewrite in one recording, carrying over the round 5 polish — on-foot combat now reads at a glance (larger player and enemies, white player ring, thicker tracers, night plaza ambush at zoom 2.0), building labels never clip at a screen edge or hide under a HUD panel, and the speedometer no longer shows half-hidden behind the mission-passed panel. Three times of day across the four screenshots: golden hour, sunset, night.
 
 ## Run it
 

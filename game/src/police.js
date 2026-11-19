@@ -5,8 +5,9 @@
 // damagePlayer in state.js (F3): that is the only place WASTED is set, so
 // being killed on foot by the police can never silently fail again.
 // Heat decays while the player stays quiet; committing crimes raises it.
-// Round 5: no police change — the night shot reuses the existing wanted
-// level 2 staging (two stars, no helicopter in the tight combat frame).
+// Round 6: full fresh rewrite in one recording — no police change; the night
+// shot reuses the existing wanted level 2 staging (two stars, no helicopter
+// in the tight combat frame).
 
 import { POLICE_CAR, MAX_WANTED } from './config.js';
 import { clamp, dist, angleDiff, angleTo, range } from './random.js';

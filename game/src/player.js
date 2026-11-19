@@ -2,8 +2,9 @@
 // Marco Solis, on foot and behind the wheel: movement, driving physics with
 // drift and near-miss cash, entering and stealing cars, punching and
 // shooting. Shooting routes through here; police damage routes through
-// damagePlayer in state.js, never the other way round. Round 5: no gameplay
-// change — only the drawn size of the on-foot player grew (render.js).
+// damagePlayer in state.js, never the other way round. Round 6: full fresh
+// rewrite in one recording — no gameplay change; only the drawn size of the
+// on-foot player grew (render.js).
 // F15: putPlayerInCar falls back to spawning a car nearby when none is.
 
 import { CARS, WEAPONS, SAND_Y } from './config.js';

@@ -6,8 +6,9 @@
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 // The run is deterministic: the same repository always writes the same
 // dossier bytes, which the grader checks by running it twice. SOLMAR round 3
-// keeps this plumbing identical to round 2 — only the game changed. Round 5
-// keeps it identical again: the polish is in the game and the screenshots.
+// keeps this plumbing identical to round 2 — only the game changed. Round 6
+// is a full fresh rewrite in one recording: the plumbing stays identical to
+// round 5, only the game and the screenshots were rewritten.
 
 import { cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

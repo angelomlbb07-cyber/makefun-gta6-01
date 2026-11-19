@@ -15,9 +15,9 @@
 //  P2 — time-of-day variety (golden hour cover, night combat, golden hour
 //       passed, sunset title); a landmark per shot (plaza fountain, pier,
 //       beach); labelled buildings and pedestrians drawn as people.
-//  Round 5 — combat moves to night (the third mood the top entries show),
-//       camera zoom 2.0 centred between the player and the enemies so the
-//       player, at least two enemies and the fountain edge are all in frame.
+//  Round 6 — full fresh rewrite in one recording; staging carried over
+//       from round 5 (combat at night, zoom 2.0, player and two enemies
+//       plus the fountain edge all in frame).
 
 import { CARS, RADIOS } from './config.js';
 import { showDialogue, showToast, addFloat } from './state.js';

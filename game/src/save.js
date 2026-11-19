@@ -2,8 +2,9 @@
 // localStorage autosave: after every mission, and on demand with quick
 // save. Loading validates the save (F8): a mission index out of range, a
 // non-numeric cash value, or a day outside 1-3 returns null instead of
-// loading garbage and crashing the game. Round 5: no save change — the
-// title shot still proves the Day 2 save slot the same way. Storage access is guarded so the
+// loading garbage and crashing the game. Round 6: full fresh rewrite in
+// one recording — no save change; the title shot still proves the Day 2
+// save slot the same way. Storage access is guarded so the
 // game also runs where localStorage is unavailable (private mode, file://).
 
 import { MISSION_COUNT } from './config.js';
