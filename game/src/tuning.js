@@ -1,145 +1,118 @@
-// tuning.js — every tunable constant for SOLMAR lives here.
-// One job: numbers. No game logic, no rendering, no imports.
-export const TUNING = {
-  // World dimensions (pixels in world space).
-  worldWidth: 5200,
-  worldHeight: 3600,
-  roadSpacing: 260,
-  roadWidth: 64,
-  blockSize: 196,
-  beachX: 340,          // west of this is sand
-  waterX: 130,          // west of this is water
-  marinaY: 900,         // marina docks live around this band
+// tuning.js — every constant and balance number for SOLMAR lives here.
+// One job: numbers. No drawing, no input, no state. The other modules read
+// these values so a balance change is a one-line edit in one place.
 
-  // Colours — sun-soaked coastal palette.
-  colours: {
-    grass: '#7fae5a',
-    sand: '#e8d29a',
-    water: '#2e7fa8',
-    waterDeep: '#1d5f86',
-    road: '#3a3d44',
-    roadLine: '#e8d44d',
-    sidewalk: '#9a9a92',
-    plaza: '#c9b896',
-    downtown: '#5a6b7d',
-    suburb: '#8aa86b',
-    buildingRoof: ['#b0563a', '#c97e4a', '#7d8aa0', '#a8a08a', '#6b7d8f', '#c9a86a'],
-    player: '#e8b13c',
-    police: '#2e5fd0',
-    heli: '#22303c',
-  },
+// Canvas the game renders at (CSS pixels; the page letterboxes it).
+export const VIEW = { width: 1280, height: 800 };
 
-  // Player on foot.
-  walkSpeed: 165,
-  runSpeed: 285,
-  playerRadius: 13,
-  punchDamage: 22,
-  punchRange: 42,
-  punchCooldown: 0.42,
+// The city is bigger than the screen; the camera follows the player.
+export const WORLD = { width: 3600, height: 2600, seaEdge: 260, beachEdge: 430 };
 
-  // Shooting.
-  pistolDamage: 34,
-  pistolRange: 460,
-  pistolCooldown: 0.24,
-  pistolAmmoStart: 36,
-  pistolAmmoMax: 120,
-  bulletSpeed: 900,
-  tracerLife: 0.09,
-
-  // Driving.
-  carAccel: 430,
-  carBrake: 700,
-  carReverseAccel: 260,
-  carMaxSpeed: 560,
-  carMaxReverse: 170,
-  carTurnRate: 2.5,
-  carDrag: 0.55,
-  handbrakeTurnBoost: 1.9,
-  carHealthMax: 100,
-  collisionDamage: 9,
-  driftCashPerSecond: 15,
-  nearMissCash: 25,
-  nearMissDistance: 46,
-
-  // Traffic.
-  trafficCount: 26,
-  trafficSpeed: 165,
-  trafficSpawnGap: 3.0,
-
-  // Pedestrians.
-  pedCount: 42,
-  pedSpeed: 52,
-
-  // Wanted / police.
-  wantedMax: 5,
-  wantedDecayDelay: 7.0,     // seconds out of sight before stars fall
-  wantedDecayInterval: 4.0,
-  copFootSpeed: 205,
-  copCarSpeed: 430,
-  copSpawnDistance: 520,
-  heliSpeed: 300,
-  heliAltitude: 1,            // drawn as a shadow + searchlight, not a sprite
-  starsForFootCops: 1,
-  starsForPatrolCars: 2,
-  starsForHeli: 2,
-  starsForRoadblock: 3,
-  copPunchDamage: 8,
-  copShootDamage: 6,
-  thugShootDamage: 7,
-  thugHealth: 60,
-  copHealth: 80,
-
-  // Pickups.
-  healthPickupHeal: 40,
-  armourPickupAmount: 50,
-  pickupRadius: 26,
-
-  // Missions.
-  missionMarkerPulse: 2.2,
-  deliveryBonusPerSecond: 4,
-  chaseTargetSpeed: 380,
-  escapeTimeBonus: 150,
-
-  // Economy.
-  startCash: 250,
-  repairCost: 120,
-  garageRepairRate: 60,       // health per second while parked in the garage zone
-  respectPerMission: 120,
-
-  // Day / night.
-  dayLengthSeconds: 420,      // full 24h cycle in game seconds
-  goldenHourStart: 16.5,     // hours
-  goldenHourEnd: 18.75,
-  nightStart: 19.5,
-  nightEnd: 5.5,
-  startClockHours: 17.1,     // golden hour — the cover look
-
-  // Camera / view.
-  viewWidth: 1280,
-  viewHeight: 800,
-  cameraLerp: 6.0,
-
-  // HUD.
-  minimapSize: 172,
-  minimapScale: 0.033,
-  popupRiseSpeed: 42,
-  popupLife: 1.5,
+// Driving — arcade physics, tuned so a chase at 150+ km/h feels fast but
+// a taxi mission at 60 km/h is still controllable.
+export const CAR = {
+  accel: 420,            // px/s^2 forward
+  reverseAccel: 260,
+  brake: 620,
+  maxSpeed: 560,         // ~155 km/h at the speedometer's scale
+  maxReverse: 180,
+  turnRate: 2.6,         // rad/s at full lock, scaled down at speed
+  grip: 6.5,             // lateral velocity damping (lower = more slide)
+  driftGrip: 2.2,        // grip while the handbrake is held
+  handbrakeTurn: 3.4,
+  nitroBoost: 1.3,       // top-speed multiplier while nitro lasts
+  nitroMax: 3.0,         // seconds of nitro per full tank
+  damagePerHit: 9,       // car damage from a hard collision
+  smokeAt: 55,           // damage % where the car starts smoking
+  wreckAt: 100,          // damage % where the car is wrecked
 };
 
-// Sanity helper used by the /tmp logic tests: every numeric constant that
-// must stay positive is checked from this list.
-export const POSITIVE_KEYS = [
-  'worldWidth', 'worldHeight', 'roadSpacing', 'roadWidth', 'walkSpeed',
-  'runSpeed', 'carAccel', 'carMaxSpeed', 'carTurnRate', 'pistolDamage',
-  'pistolRange', 'bulletSpeed', 'trafficCount', 'pedCount', 'dayLengthSeconds',
+// On foot.
+export const FOOT = {
+  walkSpeed: 170,
+  runSpeed: 250,
+  punchDamage: 12,
+};
+
+// Combat.
+export const GUN = {
+  pistol: { damage: 34, rate: 0.28, spread: 0.06, range: 520, mag: 12, reserve: 72 },
+  smg: { damage: 18, rate: 0.09, spread: 0.11, range: 460, mag: 30, reserve: 120 },
+};
+
+// Wanted level. Foot cops show up at 1 star, patrol cars at 2+, the police
+// helicopter with its searchlight at 2+. Heat decays only when no cop can
+// see the player (line of sight broken).
+export const WANTED = {
+  maxStars: 5,
+  heatPerStar: 100,
+  decayPerSecond: 14,    // heat lost while unseen
+  seenGrace: 1.2,        // seconds of being unseen before decay starts
+  bustTime: 1.5,         // seconds a foot cop must stay close to bust you
+  bustFine: 150,
+  wastedFine: 100,
+  copCarSpeed: 500,
+  heliSpeed: 340,
+  heliSpotRadius: 170,
+};
+
+// Money and progression.
+export const ECONOMY = {
+  startCash: 150,
+  nearMissCash: 150,     // "+$150 NEAR MISS" floating text
+  driftCashPerChain: 25, // per drift multiplier step
+  respectPerLevel: 500,  // respect points per level
+  repairCost: 120,
+  armourCost: 200,
+  upgradeCost: 450,
+  maxArmour: 100,
+};
+
+// Missions: 12 story jobs across 3 days. Payouts grow with the day.
+export const MISSION_PAYOUTS = [300, 450, 500, 600, 750, 900, 1500, 1200, 1300, 1800, 2200, 5000];
+export const MISSION_RESPECT = [120, 150, 150, 180, 200, 220, 250, 220, 240, 300, 350, 600];
+
+// Radio — four procedural stations, all synthesized with WebAudio.
+export const RADIO = [
+  { name: 'SOL FM 95.4', genre: 'SUNSET SYNTH', bpm: 96 },
+  { name: 'CORAL 88.1', genre: 'PALM POP', bpm: 118 },
+  { name: 'NEON TIDE 99.1', genre: 'NIGHT DRIVE', bpm: 104 },
+  { name: 'MARINA TALK 101.7', genre: 'CITY TALK', bpm: 80 },
 ];
 
-export function tuningIsSane() {
-  for (const key of POSITIVE_KEYS) {
-    const value = TUNING[key];
-    if (typeof value !== 'number' || !(value > 0)) return { ok: false, key, value };
-  }
-  if (TUNING.wantedMax !== 5) return { ok: false, key: 'wantedMax', value: TUNING.wantedMax };
-  if (TUNING.starsForHeli < TUNING.starsForPatrolCars) return { ok: false, key: 'starsForHeli', value: TUNING.starsForHeli };
-  return { ok: true };
+// --- small utilities shared by every module -------------------------------
+
+export function clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; }
+export function lerp(a, b, t) { return a + (b - a) * t; }
+export function dist(ax, ay, bx, by) { return Math.hypot(bx - ax, by - ay); }
+export function wrapAngle(a) {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
 }
+export function angleDiff(a, b) { return wrapAngle(b - a); }
+
+// Deterministic RNG so the city (and staged screenshots) are reproducible.
+export function mulberry32(seed) {
+  let s = seed >>> 0;
+  return function next() {
+    s = (s + 0x6D2B79F5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+export function fmtMoney(n) { return '$' + Math.round(n).toLocaleString('en-US'); }
+export function fmtClock(hours) {
+  const total = Math.round(hours * 60); // round first: 18.2 floats as 18.1999…
+  const h = Math.floor(total / 60) % 24;
+  const m = total % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+export function fmtTimer(seconds) {
+  const s = Math.max(0, Math.ceil(seconds));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+export function stars(n) { return '★'.repeat(n) + '☆'.repeat(Math.max(0, 5 - n)); }

@@ -1,180 +1,314 @@
-// story.js — the SOLMAR story: 12 missions across 3 days.
-// One job: mission definitions, progression, and win/fail rules.
-import { TUNING } from './tuning.js';
-import { raiseWanted, makeThug } from './actors.js';
-import { addPopup } from './vehicles.js';
+// story.js — the 12-mission story of Solmar across 3 days, with dialogue,
+// objectives, payouts and progression. One job: what the player has to do
+// and what happens when they do it. Mission types: taxi, repo/delivery,
+// chase, combat, heist. Marisol Vega is the contact; Benny runs the garage.
 
-// Every mission: id, day, title, type, briefing, target landmark, payout,
-// optional time limit, and how many thugs guard it.
+import { MISSION_PAYOUTS, MISSION_RESPECT, clamp, dist, mulberry32 } from './tuning.js';
+import { roadPoint } from './world.js';
+import { createCar, nearestCar } from './vehicles.js';
+import { damagePlayer } from './actors.js';
+
 export const MISSIONS = [
-  { id: 1, day: 1, title: 'First Wheels', type: 'drive', briefing: 'Benny needs a car moved from the beach to his garage. Steal any car and drive it there.', target: 'garage', payout: 150, timeLimit: 0, thugs: 0 },
-  { id: 2, day: 1, title: 'Beach Run', type: 'delivery', briefing: 'Deliver the package to Marina Plaza before the timer runs out. Cops are watching the beach road.', target: 'plaza', payout: 220, timeLimit: 75, thugs: 0 },
-  { id: 3, day: 1, title: 'Dockside Debt', type: 'shootout', briefing: 'Three dock thugs owe Benny money. Go to the South Docks and collect — by force if needed.', target: 'southDocks', payout: 300, timeLimit: 0, thugs: 3 },
-  { id: 4, day: 1, title: 'The Getaway', type: 'escape', briefing: 'The job went loud. Lose the cops: break line of sight until your wanted level drops to zero.', target: 'northGate', payout: 280, timeLimit: 120, thugs: 0 },
-  { id: 5, day: 2, title: 'Plaza Pickup', type: 'drive', briefing: 'Pick up the courier at Marina Plaza and bring her to Downtown. Do not wreck the car.', target: 'downtown', payout: 350, timeLimit: 100, thugs: 0 },
-  { id: 6, day: 2, title: 'Warehouse War', type: 'shootout', briefing: 'Rival crew holds the warehouse by the airfield. Clear all five thugs.', target: 'airport', payout: 520, timeLimit: 0, thugs: 5 },
-  { id: 7, day: 2, title: 'Hot Pursuit', type: 'chase', briefing: 'A rival driver stole Benny’s Comet. Chase him down the beach road and ram his car until it wrecks.', target: 'beachStart', payout: 480, timeLimit: 110, thugs: 0 },
-  { id: 8, day: 2, title: 'Night Shift', type: 'delivery', briefing: 'Night delivery to the North Gate. The streets are crawling with patrol cars — stay fast, stay quiet.', target: 'northGate', payout: 430, timeLimit: 90, thugs: 0 },
-  { id: 9, day: 3, title: 'The Big Score', type: 'drive', briefing: 'Day three. Drive to Downtown and case the vault. One mistake and the whole city wakes up.', target: 'downtown', payout: 600, timeLimit: 120, thugs: 0 },
-  { id: 10, day: 3, title: 'Vault Break', type: 'shootout', briefing: 'Inside the vault. Six guards between you and the money. Clear the room.', target: 'downtown', payout: 900, timeLimit: 0, thugs: 6 },
-  { id: 11, day: 3, title: 'Harbour Chase', type: 'chase', briefing: 'They are running for the marina. Run their car off the road before they reach the docks.', target: 'marina', payout: 750, timeLimit: 100, thugs: 0 },
-  { id: 12, day: 3, title: 'Final Escape', type: 'escape', briefing: 'The big score is done. Five stars. Escape to the airfield and lose every cop — then Solmar is yours.', target: 'airport', payout: 1500, timeLimit: 180, thugs: 0 },
+  { name: 'First Wheels', day: 1, type: 'repo', time: 240, payout: 300, respect: 120, wanted: 0,
+    brief: 'Marisol needs wheels. Any car. Don\'t ask.',
+    dialogue: 'Marisol Vega: Maris needs wheels. Any car. Don\'t ask where it goes.' },
+  { name: 'Sunset Taxi', day: 1, type: 'taxi', time: 300, payout: 450, respect: 150, wanted: 0,
+    brief: 'Pick up the fare at the pier, drop them at the Sunset Inn.',
+    dialogue: 'Marisol Vega: A fare is waiting at the pier. Drive like you mean it.' },
+  { name: 'The Repo Run', day: 1, type: 'repo', time: 300, payout: 500, respect: 150, wanted: 1,
+    brief: 'Steal the Sunset Coupe at the marina. Bring it to Benny\'s Garage.',
+    dialogue: 'Benny: That coupe at the marina? It\'s mine now. Bring it home.' },
+  { name: 'Marina Chase', day: 1, type: 'chase', time: 240, payout: 600, respect: 180, wanted: 2,
+    brief: 'A rival crew took the cash. Chase their car down and take it back.',
+    dialogue: 'Marisol Vega: They took my cash. Follow that car. Do not lose it.' },
+  { name: 'Dockside Delivery', day: 2, type: 'delivery', time: 300, payout: 750, respect: 200, wanted: 1,
+    brief: 'Pick up the package at the docks. Deliver it to the plaza. No stops.',
+    dialogue: 'Marisol Vega: The package is at the docks. No stops, no peeking.' },
+  { name: 'Plaza Pickup', day: 2, type: 'taxi', time: 300, payout: 900, respect: 220, wanted: 1,
+    brief: 'A client waits at Coral Plaza. Get them to the Coral Casino, fast.',
+    dialogue: 'Marisol Vega: Client at the plaza. Casino, fast. Tip\'s in it for you.' },
+  { name: 'Sunset Heist', day: 2, type: 'heist', time: 420, payout: 1500, respect: 250, wanted: 2,
+    brief: 'Walk into the Coral Casino, crack the vault, then fight your way out.',
+    dialogue: 'Marisol Vega: The vault at the Coral Casino. In, out, rich. Simple.' },
+  { name: 'Getaway Driver', day: 2, type: 'chase', time: 300, payout: 1200, respect: 220, wanted: 2,
+    brief: 'Lose the cops, then reach the safehouse on Old Solmar.',
+    dialogue: 'Marisol Vega: Three stars and counting. Lose them, then come home.' },
+  { name: 'Turf War', day: 3, type: 'combat', time: 360, payout: 1300, respect: 240, wanted: 2,
+    brief: 'Take out the Coral Kings holding the plaza. Six of them. All of them.',
+    dialogue: 'Marisol Vega: The Coral Kings took my plaza. Take it back. All six.' },
+  { name: 'The Big Score', day: 3, type: 'delivery', time: 360, payout: 1800, respect: 300, wanted: 2,
+    brief: 'Move the score from Marina Bay Bank to the safehouse. Cops will notice.',
+    dialogue: 'Marisol Vega: The bank job money. Move it. Do not get cute.' },
+  { name: 'Harbor Ambush', day: 3, type: 'combat', time: 360, payout: 2200, respect: 350, wanted: 3,
+    brief: 'Ambush the convoy on the harbor road. Take the truck, lose the tail.',
+    dialogue: 'Benny: Convoy on the harbor road. Hit it hard, then vanish.' },
+  { name: 'King of Solmar', day: 3, type: 'heist', time: 480, payout: 5000, respect: 600, wanted: 3,
+    brief: 'One last job: crack the vault, hold the plaza, walk out a legend.',
+    dialogue: 'Marisol Vega: One last job and Solmar is ours. Make it count.' },
 ];
 
-export function missionIsValid(m) {
-  return m && typeof m.id === 'number' && m.id >= 1 && m.id <= 12
-    && typeof m.title === 'string' && m.title.length > 2
-    && typeof m.payout === 'number' && m.payout > 0
-    && ['drive', 'delivery', 'shootout', 'chase', 'escape'].includes(m.type)
-    && typeof m.target === 'string' && m.target.length > 0
-    && m.day >= 1 && m.day <= 3;
-}
-
-export function missionsAreComplete() {
-  if (MISSIONS.length !== 12) return { ok: false, reason: `expected 12 missions, got ${MISSIONS.length}` };
-  const ids = new Set();
-  for (const m of MISSIONS) {
-    if (!missionIsValid(m)) return { ok: false, reason: `mission ${m.id} invalid` };
-    if (ids.has(m.id)) return { ok: false, reason: `duplicate mission id ${m.id}` };
-    ids.add(m.id);
-  }
-  for (let day = 1; day <= 3; day++) {
-    if (!MISSIONS.some((m) => m.day === day)) return { ok: false, reason: `no missions on day ${day}` };
-  }
-  return { ok: true };
-}
-
-// Start a mission: place the marker, spawn its thugs / chase car, reset timers.
-export function startMission(state, index) {
-  const def = MISSIONS[index];
-  if (!def) return null;
-  const landmark = state.world.landmarks[def.target];
-  const mission = {
-    def, index, timer: def.timeLimit, elapsed: 0,
-    targetX: landmark.x, targetY: landmark.y, targetLabel: landmark.label,
-    phase: 'active', thugsLeft: def.thugs, chaseCar: null,
-    startCash: state.cash, startHealth: state.player.health,
+export function createMissionState() {
+  return {
+    index: 0, step: 0, timer: 0,
+    target: null, steps: [],
+    passed: null, passedTimer: 0, betweenTimer: 0,
+    finished: false,
+    holdTimer: 0, chaseTimer: 0, taxiFare: null,
+    stats: { shotsFired: 0, shotsHit: 0, kills: 0, carsDestroyed: 0, carsStolen: 0, startTime: 0 },
   };
-  if (def.type === 'shootout') {
-    for (let i = 0; i < def.thugs; i++) {
-      const a = (i / def.thugs) * Math.PI * 2;
-      state.thugs.push(makeThug(landmark.x + Math.cos(a) * 130, landmark.y + Math.sin(a) * 130));
+}
+
+function buildSteps(state, mission) {
+  const rng = mulberry32((state.world.seed + mission.name.length * 977 + state.mission.index * 131) >>> 0);
+  const w = state.world;
+  const steps = [];
+  const garage = { x: w.garage.x, y: w.garage.y };
+  const plaza = { x: w.fountain.x, y: w.fountain.y };
+  const casino = { x: 2455, y: 1625 };
+  const pier = { x: 320, y: 1473 };
+  const bank = { x: 2285, y: 765 };
+  const safehouse = { x: w.safehouse.x, y: w.safehouse.y };
+  switch (mission.type) {
+    case 'repo': {
+      const carSpot = roadPoint(w, rng);
+      steps.push({ kind: 'goto', x: carSpot.x, y: carSpot.y, label: 'Steal a car — any car will do' });
+      steps.push({ kind: 'drive', x: garage.x, y: garage.y, label: 'Deliver the car to Benny\'s Garage' });
+      break;
+    }
+    case 'taxi': {
+      const from = mission.name === 'Sunset Taxi' ? pier : plaza;
+      const to = mission.name === 'Sunset Taxi' ? { x: 780, y: 1755 } : casino;
+      steps.push({ kind: 'goto', x: from.x, y: from.y, label: 'Pick up the fare' });
+      steps.push({ kind: 'drive', x: to.x, y: to.y, label: 'Drop the fare off — drive smooth' });
+      break;
+    }
+    case 'chase': {
+      const start = roadPoint(w, rng);
+      steps.push({ kind: 'chase', x: start.x, y: start.y, label: 'Chase the rival car — stay close', seconds: 12 });
+      steps.push({ kind: 'drive', x: safehouse.x, y: safehouse.y, label: 'Lose the heat — reach the safehouse' });
+      break;
+    }
+    case 'delivery': {
+      const pickup = roadPoint(w, rng);
+      steps.push({ kind: 'goto', x: pickup.x, y: pickup.y, label: 'Pick up the package' });
+      steps.push({ kind: 'drive', x: plaza.x, y: plaza.y, label: 'Deliver the package to Coral Plaza' });
+      break;
+    }
+    case 'heist': {
+      steps.push({ kind: 'goto', x: casino.x, y: casino.y, label: 'Get out of the car, walk into the Coral Casino' });
+      steps.push({ kind: 'hold', x: casino.x, y: casino.y, label: 'Hold E to crack the vault', hold: mission.name === 'King of Solmar' ? 4 : 3 });
+      steps.push({ kind: 'kill', x: plaza.x, y: plaza.y, label: 'Fight your way out — take down the guards', count: 6 });
+      steps.push({ kind: 'drive', x: safehouse.x, y: safehouse.y, label: 'Reach the safehouse with the score' });
+      break;
+    }
+    case 'combat': {
+      steps.push({ kind: 'kill', x: plaza.x, y: plaza.y, label: 'Take out the Coral Kings (' + (mission.name === 'Turf War' ? 6 : 5) + ' of them)', count: mission.name === 'Turf War' ? 6 : 5 });
+      steps.push({ kind: 'drive', x: safehouse.x, y: safehouse.y, label: 'Get clear — reach the safehouse' });
+      break;
+    }
+    default:
+      steps.push({ kind: 'drive', x: safehouse.x, y: safehouse.y, label: 'Reach the safehouse' });
+  }
+  return steps;
+}
+
+export function startMission(state, index) {
+  // F2 guard: an index past the last mission stays in finished free-roam
+  // (or replays mission 12) instead of throwing on MISSIONS[12].
+  if (index >= MISSIONS.length) {
+    state.mission.finished = true;
+    state.mission.index = MISSIONS.length;
+    return;
+  }
+  const m = state.mission;
+  m.index = clamp(Math.floor(index), 0, MISSIONS.length - 1);
+  m.step = 0;
+  m.passed = null; m.passedTimer = 0; m.betweenTimer = 0;
+  m.holdTimer = 0; m.chaseTimer = 0; m.taxiFare = null;
+  m.stats = { shotsFired: 0, shotsHit: 0, kills: 0, carsDestroyed: 0, carsStolen: 0, startTime: state.time };
+  const mission = MISSIONS[m.index];
+  m.timer = mission.time;
+  m.steps = buildSteps(state, mission);
+  m.target = m.steps[0];
+  state.day = mission.day;
+  if (mission.wanted > 0) {
+    state.wanted = mission.wanted;
+    state.wantedHeat = mission.wanted * 100;
+  }
+  state.enemies = [];
+  state.toast = { speaker: 'Marisol Vega', text: mission.dialogue.replace('Marisol Vega: ', ''), t: 6 };
+  state.dialogue = { speaker: 'Marisol Vega', text: mission.dialogue.replace('Marisol Vega: ', ''), portrait: true, t: 6 };
+}
+
+export function currentObjectiveText(state) {
+  const m = state.mission;
+  if (m.finished) return 'Free roam — Solmar is yours';
+  const step = m.steps[m.step];
+  if (!step) return MISSIONS[m.index].brief;
+  if (step.kind === 'kill') {
+    const done = Math.min(m.stats.kills, step.count);
+    const base = step.label.replace(/\(\d+ of them\)/, '').trim();
+    return base + ' — ' + done + '/' + step.count + ' down';
+  }
+  return step.label;
+}
+
+export function missionRating(state) {
+  const s = state.mission.stats;
+  const accuracy = s.shotsFired === 0 ? 0 : Math.round((s.shotsHit / s.shotsFired) * 100);
+  const timeUsed = Math.max(1, Math.round(state.time - s.startTime));
+  const starsEarned = 3 + (accuracy >= 60 ? 1 : 0) + (timeUsed < 200 ? 1 : 0);
+  return { accuracy, timeUsed, stars: Math.min(5, starsEarned) };
+}
+
+export function completeMission(state) {
+  const m = state.mission;
+  const mission = MISSIONS[m.index];
+  const rating = missionRating(state);
+  state.cash += mission.payout;
+  state.respect += mission.respect;
+  const before = state.respectLevel;
+  state.respectLevel = 1 + Math.floor(state.respect / 500);
+  m.passed = {
+    name: mission.name, payout: mission.payout, respect: mission.respect,
+    rating, levelUp: state.respectLevel > before, level: state.respectLevel,
+    carsDestroyed: m.stats.carsDestroyed, carsStolen: m.stats.carsStolen,
+    kills: m.stats.kills,
+  };
+  m.passedTimer = 6;
+  state.wanted = Math.max(0, state.wanted - 1);
+  state.wantedHeat = state.wanted * 100;
+  state.enemies = [];
+  state.floats.push({ x: state.player.x, y: state.player.y - 40, text: '+' + mission.payout + ' PAYOUT', t: 2, color: '#ffd94a' });
+  if (m.index + 1 >= MISSIONS.length) {
+    m.finished = true;
+    m.betweenTimer = 0;
+  } else {
+    m.betweenTimer = 2.5;
+  }
+  state.screen = 'passed';
+}
+
+export function stepMissions(state, dt) {
+  const m = state.mission;
+  // F1 fix: the passed panel's timer ticks unconditionally, so the panel
+  // always dismisses — even after the 12th mission.
+  if (m.passedTimer > 0) {
+    m.passedTimer -= dt;
+    if (m.passedTimer <= 0) {
+      m.passed = null;
+      if (state.screen === 'passed') state.screen = 'play';
     }
   }
-  if (def.type === 'chase') {
-    const chase = {
-      kind: 'car', x: landmark.x + 160, y: landmark.y, angle: 0,
-      model: 'Prowler', color: '#7d3ad8', len: 47, wid: 22,
-      speed: 0, health: 120, traffic: false, steer: 0, drift: 0, dead: false,
-      targetSpeed: TUNING.chaseTargetSpeed, chaseTarget: true,
-    };
-    state.cars.push(chase);
-    mission.chaseCar = chase;
-    mission.targetX = chase.x; mission.targetY = chase.y;
+  if (m.finished || m.passed) return;
+  if (state.screen !== 'play') return;
+  m.timer -= dt;
+  if (m.timer <= 0) {
+    // Time ran out: restart the mission.
+    startMission(state, m.index);
+    return;
   }
-  if (def.type === 'escape') {
-    raiseWanted(state, def.id === 12 ? 5 : 2);
+  const step = m.steps[m.step];
+  if (!step) return;
+  const p = state.player;
+  const d = dist(p.x, p.y, step.x, step.y);
+  switch (step.kind) {
+    case 'goto':
+      if (d < 70) advanceStep(state);
+      break;
+    case 'drive':
+      if (d < 80 && !p.onFoot) advanceStep(state);
+      else if (d < 80 && p.onFoot) {
+        // On foot at the target still counts for delivery-style steps.
+        if (m.index === 0) advanceStep(state);
+      }
+      break;
+    case 'chase': {
+      if (!state.chaseCar || state.chaseCar.dead) {
+        state.chaseCar = createCar(step.x, step.y, 0, 4, {});
+        state.cars.push(state.chaseCar);
+      }
+      const cd = dist(p.x, p.y, state.chaseCar.x, state.chaseCar.y);
+      if (cd < 420) {
+        m.chaseTimer += dt;
+        if (m.chaseTimer >= step.seconds) advanceStep(state);
+      } else m.chaseTimer = Math.max(0, m.chaseTimer - dt * 2);
+      // The fleeing car drives away along the roads.
+      const flee = Math.atan2(step.y - state.chaseCar.y, step.x - state.chaseCar.x);
+      state.chaseCar.angle = flee;
+      state.chaseCar.speed = 260;
+      state.chaseCar.x += Math.cos(flee) * 260 * dt;
+      state.chaseCar.y += Math.sin(flee) * 260 * dt;
+      break;
+    }
+    case 'hold': {
+      const near = d < 60 && p.onFoot;
+      if (near && state.input.holdE) {
+        m.holdTimer += dt;
+        if (m.holdTimer >= step.hold) advanceStep(state);
+      } else m.holdTimer = Math.max(0, m.holdTimer - dt);
+      break;
+    }
+    case 'kill': {
+      if (state.enemies.length === 0 && m.stats.kills < step.count) spawnEnemies(state, step);
+      if (m.stats.kills >= step.count) advanceStep(state);
+      break;
+    }
+    default:
+      if (d < 80) advanceStep(state);
   }
-  state.mission = mission;
-  state.message = `${def.title} — ${def.briefing}`;
-  state.messageT = 6;
-  if (state.sound) state.sound.missionStart();
-  return mission;
+  // Inter-mission wait: start the next mission after the passed panel.
+  if (m.betweenTimer > 0) {
+    m.betweenTimer -= dt;
+    if (m.betweenTimer <= 0 && !m.finished) startMission(state, m.index + 1);
+  }
 }
 
-function distToTarget(state) {
+function advanceStep(state) {
   const m = state.mission;
-  const px = state.playerCar && !state.player.onFoot ? state.playerCar.x : state.player.x;
-  const py = state.playerCar && !state.player.onFoot ? state.playerCar.y : state.player.y;
-  return Math.hypot(m.targetX - px, m.targetY - py);
+  m.step++;
+  m.holdTimer = 0; m.chaseTimer = 0;
+  if (m.step >= m.steps.length) {
+    completeMission(state);
+  } else {
+    m.target = m.steps[m.step];
+  }
 }
 
-// Advance the active mission. Returns 'passed', 'failed', or null.
-export function updateMission(state, dt) {
-  const m = state.mission;
-  if (!m || m.phase !== 'active') return null;
-  m.elapsed += dt;
-  if (m.timer > 0) {
-    m.timer -= dt;
-    if (m.timer <= 0) return failMission(state, 'Time ran out.');
+function spawnEnemies(state, step) {
+  const rng = mulberry32((state.time * 331 | 0) + step.count * 17);
+  for (let i = 0; i < step.count; i++) {
+    const a = (i / step.count) * Math.PI * 2;
+    state.enemies.push({
+      x: step.x + Math.cos(a) * 160, y: step.y + Math.sin(a) * 160,
+      angle: a + Math.PI, health: 60, speed: 130, dead: false, shootTimer: 1 + rng() * 2,
+    });
   }
-  if (m.def.type === 'shootout') {
-    m.thugsLeft = state.thugs.filter((t) => !t.dead).length;
-    const nearTarget = Math.hypot(state.player.x - m.targetX, state.player.y - m.targetY) < 420;
-    if (nearTarget) for (const t of state.thugs) t.alerted = true;
-    if (m.thugsLeft === 0 && state.thugs.length > 0) return passMission(state);
-    if (m.thugsLeft === 0 && state.thugs.length === 0) return passMission(state);
-  }
-  if (m.def.type === 'chase' && m.chaseCar) {
-    m.targetX = m.chaseCar.x; m.targetY = m.chaseCar.y;
-    if (m.chaseCar.dead || m.chaseCar.health <= 0) return passMission(state);
-  }
-  if (m.def.type === 'escape') {
-    const reached = distToTarget(state) < 130;
-    if (reached && state.wantedWhole === 0) return passMission(state);
-  }
-  if (['drive', 'delivery'].includes(m.def.type)) {
-    if (distToTarget(state) < 110) return passMission(state);
-  }
-  if (state.playerDead) return failMission(state, 'You were taken down.');
-  return null;
 }
 
-export function passMission(state) {
-  const m = state.mission;
-  m.phase = 'passed';
-  const timeBonus = m.timer > 0 ? Math.floor(m.timer) * TUNING.deliveryBonusPerSecond : 0;
-  const payout = m.def.payout + timeBonus + (m.def.type === 'escape' ? TUNING.escapeTimeBonus : 0);
-  state.cash += payout;
-  state.respect += TUNING.respectPerMission;
-  const newLevel = 1 + Math.floor(state.respect / 300);
-  const leveledUp = newLevel > state.level;
-  state.level = newLevel;
-  state.completed.push(m.def.id);
-  state.missionIndex = Math.min(MISSIONS.length, m.index + 1);
-  state.day = MISSIONS[Math.min(state.missionIndex, MISSIONS.length - 1)].day;
-  const accuracy = state.stats.shots > 0 ? Math.round((state.stats.hits / state.stats.shots) * 100) : 100;
-  state.lastResult = {
-    kind: 'passed', title: m.def.title, payout, timeBonus,
-    time: Math.round(m.elapsed), accuracy,
-    carsDestroyed: state.stats.carsDestroyed, leveledUp,
-    next: state.missionIndex < MISSIONS.length
-      ? `Next job: ${MISSIONS[state.missionIndex].title}`
-      : 'Story complete — Solmar is yours.',
-    stars: 5,
-  };
-  state.screen = 'passed';
-  state.thugs = state.thugs.filter((t) => t.dead);
-  if (state.sound) state.sound.missionPassed();
-  addPopup(state, state.player.x, state.player.y - 40, `+$${payout}`, '#7ddc8a');
-  return 'passed';
+export function stepEnemies(state, dt) {
+  const p = state.player;
+  for (const e of state.enemies) {
+    if (e.dead) continue;
+    const d = dist(e.x, e.y, p.x, p.y);
+    const a = Math.atan2(p.y - e.y, p.x - e.x);
+    e.angle = a;
+    if (d > 260) {
+      e.x += Math.cos(a) * e.speed * dt;
+      e.y += Math.sin(a) * e.speed * dt;
+    }
+    e.shootTimer -= dt;
+    if (e.shootTimer <= 0 && d < 520) {
+      e.shootTimer = 1.4 + Math.random() * 0.8;
+      state.tracers.push({ x1: e.x, y1: e.y, x2: p.x, y2: p.y, t: 0.09, color: '#ff8a6a' });
+      state.flashes.push({ x: e.x + Math.cos(a) * 18, y: e.y + Math.sin(a) * 18, t: 0.07 });
+      if (Math.random() < 0.55) damagePlayer(state, 6); // enemy fire, one damage path
+    }
+  }
 }
 
-export function failMission(state, reason) {
-  const m = state.mission;
-  m.phase = 'failed';
-  state.lastResult = {
-    kind: 'failed', title: m.def.title, reason: reason || 'Mission failed.',
-    payout: 0, time: Math.round(m.elapsed),
-  };
-  state.screen = 'failed';
-  state.wanted = Math.max(state.wanted, 1);
-  state.wantedWhole = Math.floor(state.wanted);
-  if (state.sound) state.sound.missionFailed();
-  return 'failed';
-}
-
-export function retryMission(state) {
-  const index = state.mission ? state.mission.index : state.missionIndex;
-  state.thugs = [];
-  state.player.health = 100;
-  state.playerDead = false;
-  state.screen = 'play';
-  startMission(state, index);
-}
-
-export function nextMissionLabel(state) {
-  if (state.missionIndex >= MISSIONS.length) return 'Story complete';
-  const m = MISSIONS[state.missionIndex];
-  return `Day ${m.day} — ${m.title} ($${m.payout})`;
+export function nextMissionPreview(state) {
+  const next = MISSIONS[state.mission.index + 1];
+  if (!next) return null;
+  return { name: next.name, payout: next.payout, wanted: next.wanted };
 }

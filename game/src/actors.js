@@ -1,421 +1,369 @@
-// actors.js — people: the player on foot, pedestrians, police, thugs,
-// and the police helicopter. One job: actors and combat.
-import { TUNING } from './tuning.js';
-import { makeRng, resolveCircleCollision, solidAt } from './world.js';
-import { addPopup, addCrashSparks } from './vehicles.js';
+// actors.js — people: the player on foot, pedestrians, foot cops, patrol
+// cars and the police helicopter. One job: bodies and the wanted level.
+// damagePlayer is the ONLY place that can set events.wasted — every damage
+// source (ram, punch, bullet) routes through it, so death always fires.
 
-const PED_SHIRTS = ['#d84a6a', '#4a8ad8', '#5ab06a', '#e8e8e8', '#c97e4a', '#8a6ad8', '#3aa88a'];
-const PED_SKINS = ['#e8b88a', '#c98a5a', '#8a5a3a', '#f0c8a0'];
+import { FOOT, GUN, WANTED, WORLD, clamp, dist, wrapAngle, mulberry32 } from './tuning.js';
+import { isWater, roadPoint } from './world.js';
 
-export function makePlayer(x, y) {
+export function createPlayer(x, y) {
   return {
-    kind: 'player', x, y, angle: -Math.PI / 2, speed: 0,
-    health: 100, armour: 0, ammo: TUNING.pistolAmmoStart,
-    onFoot: true, punchCooldown: 0, shootCooldown: 0, moving: false,
+    x, y, angle: -Math.PI / 2, speed: 0,
+    onFoot: true, car: null,
+    health: 100, armour: 0,
+    weapon: 'pistol',
+    ammoPistol: GUN.pistol.mag, reservePistol: GUN.pistol.reserve,
+    ammoSmg: GUN.smg.mag, reserveSmg: GUN.smg.reserve,
+    fireCooldown: 0, reloadTimer: 0,
+    invuln: 0, runTimer: 0,
+    aimAngle: 0,
   };
 }
 
-export function makePed(x, y, rng) {
+export function createPed(x, y, rng) {
+  const colors = ['#e8c840', '#c86a8a', '#6aa8c8', '#8ac86a', '#d8d8d8', '#e08a3a'];
   return {
-    kind: 'ped', x, y, angle: rng() * Math.PI * 2, speed: TUNING.pedSpeed * (0.7 + rng() * 0.6),
-    shirt: PED_SHIRTS[Math.floor(rng() * PED_SHIRTS.length)],
-    skin: PED_SKINS[Math.floor(rng() * PED_SKINS.length)],
-    walkPhase: rng() * 6.28, panic: 0, fleeX: 0, fleeY: 0,
+    x, y, angle: rng() * Math.PI * 2, speed: 30 + rng() * 40,
+    color: colors[Math.floor(rng() * colors.length)],
+    walkPhase: rng() * 6, target: null, panic: 0,
   };
 }
 
-export function spawnPeds(world, count, nearX, nearY) {
-  const rng = makeRng(424242 + count);
-  const peds = [];
+export function spawnPeds(state, count) {
+  const rng = mulberry32((state.world.seed ^ 0x77aa) >>> 0);
   let guard = 0;
-  while (peds.length < count && guard++ < count * 40) {
-    const x = nearX + (rng() - 0.5) * 1600;
-    const y = nearY + (rng() - 0.5) * 1200;
-    if (x < 200 || x > TUNING.worldWidth - 100 || y < 100 || y > TUNING.worldHeight - 100) continue;
-    if (solidAt(world, x, y)) continue;
-    peds.push(makePed(x, y, rng));
+  while (state.peds.length < count && guard++ < 300) {
+    const p = roadPoint(state.world, rng);
+    if (dist(p.x, p.y, state.player.x, state.player.y) < 260) continue;
+    state.peds.push(createPed(p.x, p.y, rng));
   }
-  return peds;
 }
 
-export function makeCop(x, y, inCar) {
-  return {
-    kind: 'cop', x, y, angle: 0, speed: 0, health: TUNING.copHealth,
-    inCar: !!inCar, shootCooldown: 1 + Math.random(), punchCooldown: 0,
-    car: null, dead: false,
-  };
-}
+// --- the player on foot ---------------------------------------------------
 
-export function makeThug(x, y) {
-  return {
-    kind: 'thug', x, y, angle: 0, speed: 0, health: TUNING.thugHealth,
-    shootCooldown: 1.5 + Math.random(), dead: false, alerted: false,
-  };
-}
-
-export function makeHeli(x, y) {
-  return { kind: 'heli', x, y, angle: 0, speed: 0, searchAngle: 0, shootCooldown: 2.5 };
-}
-
-// --- Player on foot -------------------------------------------------------
-export function updatePlayerOnFoot(player, input, world, dt, state) {
-  const T = TUNING;
+export function stepPlayerOnFoot(state, input, dt) {
+  const p = state.player;
+  p.fireCooldown = Math.max(0, p.fireCooldown - dt);
+  p.reloadTimer = Math.max(0, p.reloadTimer - dt);
+  p.invuln = Math.max(0, p.invuln - dt);
   const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
   const my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
-  const running = input.run;
-  const speed = running ? T.runSpeed : T.walkSpeed;
-  player.moving = mx !== 0 || my !== 0;
-  if (player.moving) {
+  const moving = mx !== 0 || my !== 0;
+  const speed = input.run ? FOOT.runSpeed : FOOT.walkSpeed;
+  if (moving) {
     const len = Math.hypot(mx, my);
-    player.x += (mx / len) * speed * dt;
-    player.y += (my / len) * speed * dt;
-    player.angle = Math.atan2(my, mx);
-    if (resolveCircleCollision(world, player, T.playerRadius) || solidAt(world, player.x, player.y)) {
-      player.x -= (mx / len) * speed * dt;
-      player.y -= (my / len) * speed * dt;
-    }
+    p.x += (mx / len) * speed * dt;
+    p.y += (my / len) * speed * dt;
+    p.angle = Math.atan2(my, mx);
+    p.walkPhase = (p.walkPhase || 0) + dt * 10;
   }
-  player.x = Math.max(TUNING.waterX + 16, Math.min(TUNING.worldWidth - 16, player.x));
-  player.y = Math.max(16, Math.min(TUNING.worldHeight - 16, player.y));
-  player.punchCooldown = Math.max(0, player.punchCooldown - dt);
-  player.shootCooldown = Math.max(0, player.shootCooldown - dt);
-  // Aim at the mouse when shooting; otherwise face the walk direction.
-  if (state.mouse.down || input.shoot) {
-    player.angle = Math.atan2(state.mouse.worldY - player.y, state.mouse.worldX - player.x);
-  }
+  p.x = clamp(p.x, 20, WORLD.width - 20);
+  p.y = clamp(p.y, 20, WORLD.height - 20);
+  // Aim at the mouse (screen space is converted by boot.js into world aim).
+  if (input.aimX !== undefined) p.aimAngle = Math.atan2(input.aimY - p.y, input.aimX - p.x);
+  // Slow health regen while alive and not recently hurt.
+  if (p.health > 0 && p.health < 100 && p.invuln <= 0) p.health = Math.min(100, p.health + 2 * dt);
 }
 
-// Punch: damages the nearest thug / cop / ped in range, in front of the player.
-export function playerPunch(state) {
-  const p = state.player;
-  if (p.punchCooldown > 0 || !p.onFoot) return false;
-  p.punchCooldown = TUNING.punchCooldown;
-  let hitAny = false;
-  const targets = [...state.thugs, ...state.cops];
-  for (const t of targets) {
-    if (t.dead) continue;
-    const dx = t.x - p.x, dy = t.y - p.y;
-    const d = Math.hypot(dx, dy);
-    if (d < TUNING.punchRange + 14) {
-      t.health -= TUNING.punchDamage;
-      state.stats.punches += 1;
-      addPopup(state, t.x, t.y - 26, `-${TUNING.punchDamage}`, '#ffffff');
-      if (t.health <= 0) killActor(state, t);
-      hitAny = true;
-    }
-  }
-  return hitAny;
-}
-
-// Shoot: hitscan with a tracer + muzzle flash; consumes ammo.
-export function playerShoot(state) {
-  const p = state.player;
-  if (p.shootCooldown > 0 || !p.onFoot || p.ammo <= 0) return false;
-  p.shootCooldown = TUNING.pistolCooldown;
-  p.ammo -= 1;
-  state.stats.shots += 1;
-  const angle = p.angle;
-  const range = TUNING.pistolRange;
-  let hit = null, hitD = range;
-  const targets = [...state.thugs, ...state.cops];
-  for (const t of targets) {
-    if (t.dead) continue;
-    const dx = t.x - p.x, dy = t.y - p.y;
-    const along = dx * Math.cos(angle) + dy * Math.sin(angle);
-    if (along < 0 || along > range) continue;
-    const perp = Math.abs(-dx * Math.sin(angle) + dy * Math.cos(angle));
-    if (perp < 20 && along < hitD) { hit = t; hitD = along; }
-  }
-  const endX = p.x + Math.cos(angle) * hitD;
-  const endY = p.y + Math.sin(angle) * hitD;
-  state.tracers.push({ x1: p.x, y1: p.y, x2: endX, y2: endY, life: TUNING.tracerLife });
-  state.muzzle = { x: p.x + Math.cos(angle) * 20, y: p.y + Math.sin(angle) * 20, life: 0.07 };
-  state.particles.push({
-    x: state.muzzle.x, y: state.muzzle.y, vx: 0, vy: 0,
-    life: 0.07, maxLife: 0.07, color: '#ffe9a8', size: 9,
-  });
-  if (hit) {
-    hit.health -= TUNING.pistolDamage;
-    state.stats.hits += 1;
-    state.particles.push({
-      x: endX, y: endY, vx: 0, vy: 0, life: 0.3, maxLife: 0.3, color: '#ff5a4d', size: 6,
-    });
-    if (hit.health <= 0) killActor(state, hit);
-    else if (hit.kind === 'thug') hit.alerted = true;
-  }
-  // Firing in public draws the law.
-  raiseWanted(state, 0.4);
-  if (state.sound) state.sound.shoot();
-  return true;
-}
-
-export function killActor(state, actor) {
-  actor.dead = true;
-  addPopup(state, actor.x, actor.y - 26, actor.kind === 'thug' ? 'THUG DOWN +$40' : 'COP DOWN', '#ffb13c');
-  if (actor.kind === 'thug') {
-    state.cash += 40;
-    state.stats.thugsDown += 1;
-    raiseWanted(state, 0.6);
-    maybeDropPickup(state, actor.x, actor.y);
-  } else if (actor.kind === 'cop') {
-    raiseWanted(state, 1);
-    state.stats.copsDown += 1;
-  }
-  addCrashSparks(state, actor.x, actor.y);
-}
-
-export function maybeDropPickup(state, x, y) {
-  if (Math.random() < 0.4) {
-    state.pickups.push({
-      kind: Math.random() < 0.5 ? 'health' : 'armour',
-      x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 30,
-    });
-  }
-}
-
-export function collectPickups(state) {
-  const p = state.player;
-  if (!p.onFoot) return;
-  for (const pk of state.pickups) {
-    if (pk.taken) continue;
-    if (Math.hypot(pk.x - p.x, pk.y - p.y) < TUNING.pickupRadius) {
-      pk.taken = true;
-      if (pk.kind === 'health') {
-        p.health = Math.min(100, p.health + TUNING.healthPickupHeal);
-        addPopup(state, p.x, p.y - 30, `+${TUNING.healthPickupHeal} HEALTH`, '#7ddc8a');
-      } else {
-        p.armour = Math.min(100, p.armour + TUNING.armourPickupAmount);
-        addPopup(state, p.x, p.y - 30, `+${TUNING.armourPickupAmount} ARMOUR`, '#7db8dc');
-      }
-    }
-  }
-  state.pickups = state.pickups.filter((pk) => !pk.taken);
-}
-
-// Damage the player, armour absorbing first.
 export function damagePlayer(state, amount) {
   const p = state.player;
-  const absorbed = Math.min(p.armour, amount);
-  p.armour -= absorbed;
-  p.health -= (amount - absorbed);
+  if (p.invuln > 0 || state.events.wasted || state.events.busted) return;
+  let left = amount;
+  if (p.armour > 0) {
+    const absorbed = Math.min(p.armour, left * 0.6);
+    p.armour -= absorbed;
+    left -= absorbed;
+  }
+  p.health -= left;
+  p.invuln = 0.6; // brief i-frames so rams cannot stack every frame
+  state.events.hurtFlash = 0.25;
   if (p.health <= 0) {
     p.health = 0;
-    state.playerDead = true;
+    state.events.wasted = true;
+    state.screen = 'wasted';
+    state.cash = Math.max(0, state.cash - WANTED.wastedFine);
   }
 }
 
-// --- Wanted ---------------------------------------------------------------
-export function raiseWanted(state, amount) {
-  state.wanted = Math.min(TUNING.wantedMax, state.wanted + amount);
-  state.wantedWhole = Math.floor(state.wanted);
-  state.lastSeenT = state.time;
-}
-
-export function updateWanted(state, dt) {
-  const T = TUNING;
-  // Wanted decays only while no cop can see the player.
-  const seen = state.cops.some((c) => !c.dead && Math.hypot(c.x - state.player.x, c.y - state.player.y) < 420)
-    || (state.heli && Math.hypot(state.heli.x - state.player.x, state.heli.y - state.player.y) < 520);
-  if (seen) state.lastSeenT = state.time;
-  if (state.wanted > 0 && state.time - state.lastSeenT > T.wantedDecayDelay) {
-    state.wantedDecayT += dt;
-    if (state.wantedDecayT >= T.wantedDecayInterval) {
-      state.wantedDecayT = 0;
-      state.wanted = Math.max(0, state.wanted - 1);
-      state.wantedWhole = Math.floor(state.wanted);
+// Fire the current weapon toward the aim angle. Returns a tracer to draw.
+export function fireWeapon(state) {
+  const p = state.player;
+  if (p.fireCooldown > 0 || p.reloadTimer > 0 || !p.onFoot) return null;
+  const gun = p.weapon === 'smg' ? GUN.smg : GUN.pistol;
+  const ammoKey = p.weapon === 'smg' ? 'ammoSmg' : 'ammoPistol';
+  if (p[ammoKey] <= 0) { reloadWeapon(state); return null; }
+  p[ammoKey]--;
+  p.fireCooldown = gun.rate;
+  const spread = (Math.random() - 0.5) * gun.spread * 2;
+  const a = p.aimAngle + spread;
+  const ex = p.x + Math.cos(a) * gun.range, ey = p.y + Math.sin(a) * gun.range;
+  state.mission.stats.shotsFired++;
+  state.tracers.push({ x1: p.x, y1: p.y, x2: ex, y2: ey, t: 0.09, color: '#ffe08a' });
+  state.flashes.push({ x: p.x + Math.cos(a) * 18, y: p.y + Math.sin(a) * 18, t: 0.07 });
+  // Hit test: nearest enemy within a cone of the shot line.
+  let best = null, bestD = Infinity;
+  for (const e of [...state.cops, ...state.enemies]) {
+    if (e.dead) continue;
+    const dx = e.x - p.x, dy = e.y - p.y;
+    const along = dx * Math.cos(a) + dy * Math.sin(a);
+    if (along < 0 || along > gun.range) continue;
+    const perp = Math.abs(-dx * Math.sin(a) + dy * Math.cos(a));
+    if (perp < 26 && along < bestD) { bestD = along; best = e; }
+  }
+  if (best) {
+    best.health -= gun.damage;
+    state.mission.stats.shotsHit++;
+    if (best.health <= 0) {
+      best.dead = true;
+      state.mission.stats.kills++;
+      state.floats.push({ x: best.x, y: best.y - 20, text: 'DOWN', t: 1.2, color: '#ff5a5a' });
     }
-  } else {
-    state.wantedDecayT = 0;
   }
-  // Keep the response matched to the stars.
-  const wantFoot = state.wantedWhole >= T.starsForFootCops ? Math.min(3 + state.wantedWhole, 8) : 0;
-  const wantCars = state.wantedWhole >= T.starsForPatrolCars ? Math.min(state.wantedWhole, 4) : 0;
-  const wantHeli = state.wantedWhole >= T.starsForHeli ? 1 : 0;
-  while (state.cops.filter((c) => !c.dead && !c.inCar).length < wantFoot) {
-    const a = Math.random() * Math.PI * 2;
-    state.cops.push(makeCop(
-      state.player.x + Math.cos(a) * T.copSpawnDistance,
-      state.player.y + Math.sin(a) * T.copSpawnDistance, false));
+  return { x: ex, y: ey };
+}
+
+export function reloadWeapon(state) {
+  const p = state.player;
+  const gun = p.weapon === 'smg' ? GUN.smg : GUN.pistol;
+  const ammoKey = p.weapon === 'smg' ? 'ammoSmg' : 'ammoPistol';
+  const reserveKey = p.weapon === 'smg' ? 'reserveSmg' : 'reservePistol';
+  if (p[ammoKey] >= gun.mag || p[reserveKey] <= 0 || p.reloadTimer > 0) return;
+  const need = gun.mag - p[ammoKey];
+  const take = Math.min(need, p[reserveKey]);
+  p[ammoKey] += take;
+  p[reserveKey] -= take;
+  p.reloadTimer = 0.9;
+}
+
+// --- pedestrians ----------------------------------------------------------
+
+export function stepPeds(state, dt) {
+  const rng = mulberry32((state.time * 977 | 0) + 13);
+  for (const ped of state.peds) {
+    if (!ped.target || dist(ped.x, ped.y, ped.target.x, ped.target.y) < 24) {
+      ped.target = roadPoint(state.world, rng);
+    }
+    const danger = state.wanted >= 3 || state.events.wasted;
+    const speed = ped.panic > 0 ? 150 : ped.speed;
+    const a = Math.atan2(ped.target.y - ped.y, ped.target.x - ped.x);
+    ped.angle = a;
+    ped.x += Math.cos(a) * speed * dt;
+    ped.y += Math.sin(a) * speed * dt;
+    ped.walkPhase += dt * 8;
+    ped.panic = Math.max(0, ped.panic - dt);
+    // Flee from gunfire.
+    if (state.flashes.length > 0 && dist(ped.x, ped.y, state.player.x, state.player.y) < 300) ped.panic = 1.5;
+    if (isWater(state.world, ped.x, ped.y)) { ped.x += 30 * dt * 10; }
   }
-  while (state.cops.filter((c) => !c.dead && c.inCar).length < wantCars) {
-    const a = Math.random() * Math.PI * 2;
-    const cop = makeCop(
-      state.player.x + Math.cos(a) * (T.copSpawnDistance + 160),
-      state.player.y + Math.sin(a) * (T.copSpawnDistance + 160), true);
-    const car = { kind: 'car', x: cop.x, y: cop.y, angle: a, model: 'Interceptor', color: TUNING.colours.police, len: 48, wid: 23, speed: 0, health: 100, traffic: false, steer: 0, drift: 0, dead: false, targetSpeed: TUNING.copCarSpeed, police: true };
-    cop.car = car;
+}
+
+// --- police ---------------------------------------------------------------
+
+export function addWanted(state, stars) {
+  state.wanted = clamp(state.wanted + stars, 0, WANTED.maxStars);
+  state.wantedHeat = state.wanted * WANTED.heatPerStar;
+  state.wantedSeenTimer = 0;
+}
+
+// Wanted decays only while no cop can see the player.
+export function stepWanted(state, dt) {
+  if (state.wanted <= 0) return;
+  const seen = state.cops.some(c => !c.dead && dist(c.x, c.y, state.player.x, state.player.y) < 420)
+    || state.copCars.some(c => !c.dead && dist(c.x, c.y, state.player.x, state.player.y) < 520)
+    || (state.heli && dist(state.heli.x, state.heli.y, state.player.x, state.player.y) < 600);
+  if (seen) { state.wantedSeenTimer = 0; return; }
+  state.wantedSeenTimer += dt;
+  if (state.wantedSeenTimer < WANTED.seenGrace) return;
+  state.wantedHeat -= WANTED.decayPerSecond * dt;
+  if (state.wantedHeat <= 0) {
+    state.wanted = Math.max(0, state.wanted - 1);
+    state.wantedHeat = state.wanted * WANTED.heatPerStar;
+    if (state.wanted === 0) { state.cops = []; state.copCars = []; state.heli = null; }
+  }
+}
+
+export function spawnPolice(state) {
+  const p = state.player;
+  const rng = mulberry32((state.time * 613 | 0) + 7);
+  const wantFoot = state.wanted >= 1 ? Math.min(2 + state.wanted, 6) : 0;
+  const wantCars = state.wanted >= 2 ? Math.min(state.wanted - 1, 3) : 0;
+  while (state.cops.filter(c => !c.dead).length < wantFoot) {
+    const a = rng() * Math.PI * 2;
+    const x = clamp(p.x + Math.cos(a) * 520, 40, WORLD.width - 40);
+    const y = clamp(p.y + Math.sin(a) * 520, 40, WORLD.height - 40);
+    state.cops.push({ x, y, health: 60, speed: 200, dead: false, punchTimer: 0, bustTimer: 0 });
+  }
+  while (state.copCars.filter(c => !c.dead).length < wantCars) {
+    const a = rng() * Math.PI * 2;
+    const x = clamp(p.x + Math.cos(a) * 640, 40, WORLD.width - 40);
+    const y = clamp(p.y + Math.sin(a) * 640, 40, WORLD.height - 40);
+    const car = { x, y, angle: 0, speed: 0, vx: 0, vy: 0, type: { name: 'Police Interceptor', color: '#20242e', top: 1.05 }, typeIndex: 0, damage: 0, color: '#20242e', traffic: false, police: true, stolen: false, nitro: 3, driftChain: 0, driftTime: 0, dead: false, path: null, pathIdx: 0 };
+    state.copCars.push(car);
     state.cars.push(car);
-    state.cops.push(cop);
   }
-  if (wantHeli && !state.heli) state.heli = makeHeli(state.player.x - 200, state.player.y - 300);
-  if (!wantHeli) state.heli = null;
-  if (state.heli) {
-    const h = state.heli;
-    const dx = state.player.x - h.x, dy = state.player.y - h.y;
-    const d = Math.hypot(dx, dy) || 1;
-    h.x += (dx / d) * TUNING.heliSpeed * dt;
-    h.y += (dy / d) * TUNING.heliSpeed * dt;
-    h.searchAngle = Math.atan2(dy, dx);
-    h.shootCooldown -= dt;
-    if (d < 380 && h.shootCooldown <= 0) {
-      h.shootCooldown = 2.2;
-      damagePlayer(state, TUNING.copShootDamage);
-      state.tracers.push({ x1: h.x, y1: h.y, x2: state.player.x, y2: state.player.y, life: 0.08 });
-    }
+  if (state.wanted >= 2 && !state.heli) {
+    state.heli = { x: p.x + 300, y: p.y - 300, angle: 0, searchOn: true };
   }
+  if (state.wanted < 2) state.heli = null;
 }
 
-// --- Police / thug AI -----------------------------------------------------
-export function updateCops(state, dt) {
+export function stepCops(state, dt) {
   const p = state.player;
   for (const cop of state.cops) {
     if (cop.dead) continue;
-    const dx = p.x - cop.x, dy = p.y - cop.y;
-    const d = Math.hypot(dx, dy) || 1;
-    cop.angle = Math.atan2(dy, dx);
-    if (cop.inCar && cop.car && !cop.car.dead) {
-      const car = cop.car;
-      const wantAngle = Math.atan2(dy, dx);
-      let diff = wantAngle - car.angle;
-      while (diff > Math.PI) diff -= Math.PI * 2;
-      while (diff < -Math.PI) diff += Math.PI * 2;
-      car.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
-      car.speed = Math.min(TUNING.copCarSpeed, car.speed + 420 * dt);
-      car.x += Math.cos(car.angle) * car.speed * dt;
-      car.y += Math.sin(car.angle) * car.speed * dt;
-      cop.x = car.x; cop.y = car.y;
-      if (d < 60) { // ram the player
-        if (p.onFoot) damagePlayer(state, TUNING.copPunchDamage);
+    const d = dist(cop.x, cop.y, p.x, p.y);
+    const a = Math.atan2(p.y - cop.y, p.x - cop.x);
+    cop.angle = a;
+    if (d > 26) {
+      cop.x += Math.cos(a) * cop.speed * dt;
+      cop.y += Math.sin(a) * cop.speed * dt;
+    }
+    cop.punchTimer -= dt;
+    if (d < 30 && cop.punchTimer <= 0) {
+      cop.punchTimer = 0.9;
+      damagePlayer(state, 8); // foot-cop punch, routed through damagePlayer (F3)
+    }
+    // Bust: a cop standing next to you on foot for 1.5 s arrests you.
+    if (d < 40 && p.onFoot && !state.events.wasted) {
+      cop.bustTimer += dt;
+      if (cop.bustTimer >= WANTED.bustTime) {
+        state.events.busted = true;
+        state.screen = 'busted';
+        state.cash = Math.max(0, state.cash - WANTED.bustFine);
+        state.wanted = 0; state.wantedHeat = 0;
+      }
+    } else cop.bustTimer = 0;
+  }
+  for (const car of state.copCars) {
+    if (car.dead) continue;
+    const d = dist(car.x, car.y, p.x, p.y);
+    const want = Math.atan2(p.y - car.y, p.x - car.x);
+    car.angle += clamp(wrapAngle(want - car.angle), -2.2 * dt, 2.2 * dt);
+    const target = p.car ? Math.min(WANTED.copCarSpeed, d * 1.4 + 120) : Math.min(320, d * 1.2 + 60);
+    car.speed = lerp(car.speed, target, 1 - Math.exp(-2 * dt));
+    car.vx = Math.cos(car.angle) * car.speed;
+    car.vy = Math.sin(car.angle) * car.speed;
+    car.x += car.vx * dt;
+    car.y += car.vy * dt;
+    // Ram: on contact the cop car hurts the player through damagePlayer.
+    if (d < 40) {
+      if (p.car) {
+        p.car.damage = Math.min(100, p.car.damage + 4);
+        car.speed *= 0.5;
+      } else {
+        damagePlayer(state, 14); // cop-car ram, routed through damagePlayer (F3)
         car.speed *= 0.4;
       }
-      resolveCircleCollision(state.world, car, car.len / 2);
-    } else {
-      const speed = TUNING.copFootSpeed;
-      cop.x += (dx / d) * speed * dt;
-      cop.y += (dy / d) * speed * dt;
-      cop.shootCooldown -= dt;
-      cop.punchCooldown = Math.max(0, cop.punchCooldown - dt);
-      if (d < 34 && cop.punchCooldown <= 0) {
-        cop.punchCooldown = 0.9;
-        damagePlayer(state, TUNING.copPunchDamage);
-      } else if (d < 300 && d > 90 && cop.shootCooldown <= 0) {
-        cop.shootCooldown = 1.4;
-        damagePlayer(state, TUNING.copShootDamage);
-        state.tracers.push({ x1: cop.x, y1: cop.y, x2: p.x, y2: p.y, life: 0.08 });
-      }
-      resolveCircleCollision(state.world, cop, 13);
     }
   }
-  state.cops = state.cops.filter((c) => !c.dead || c.inCar);
-  // Drop corpses' cars out of the cop list cleanly.
-  state.cops = state.cops.filter((c) => !(c.dead && !c.inCar));
 }
 
-export function updateThugs(state, dt) {
+export function stepHeli(state, dt) {
+  const h = state.heli;
+  if (!h) return;
   const p = state.player;
-  for (const thug of state.thugs) {
-    if (thug.dead) continue;
-    const dx = p.x - thug.x, dy = p.y - thug.y;
-    const d = Math.hypot(dx, dy) || 1;
-    thug.angle = Math.atan2(dy, dx);
-    if (thug.alerted && d < 520) {
-      thug.shootCooldown -= dt;
-      if (d > 130) {
-        thug.x += (dx / d) * 120 * dt;
-        thug.y += (dy / d) * 120 * dt;
-      }
-      if (thug.shootCooldown <= 0) {
-        thug.shootCooldown = 1.1 + Math.random() * 0.5;
-        if (d < 480) {
-          damagePlayer(state, TUNING.thugShootDamage);
-          state.tracers.push({ x1: thug.x, y1: thug.y, x2: p.x, y2: p.y, life: 0.08 });
-          if (state.sound) state.sound.enemyShoot();
-        }
-      }
-      resolveCircleCollision(state.world, thug, 13);
-    }
-  }
+  const d = dist(h.x, h.y, p.x, p.y);
+  const want = Math.atan2(p.y - h.y, p.x - h.x);
+  h.angle = want;
+  const sp = d > 200 ? WANTED.heliSpeed : 120;
+  h.x += Math.cos(want) * sp * dt;
+  h.y += Math.sin(want) * sp * dt;
+  // The searchlight pins the player: heat stops decaying while lit.
+  h.lit = d < WANTED.heliSpotRadius * 2.4;
 }
 
-// --- Pedestrians ----------------------------------------------------------
-export function updatePeds(state, dt) {
-  const p = state.player;
-  for (const ped of state.peds) {
-    const d = Math.hypot(ped.x - p.x, ped.y - p.y);
-    if (state.wantedWhole >= 2 && d < 220) {
-      // Panic: run away from the player.
-      ped.panic = 2;
-      ped.fleeX = ped.x - p.x; ped.fleeY = ped.y - p.y;
-    }
-    if (ped.panic > 0) {
-      ped.panic -= dt;
-      const len = Math.hypot(ped.fleeX, ped.fleeY) || 1;
-      ped.x += (ped.fleeX / len) * 150 * dt;
-      ped.y += (ped.fleeY / len) * 150 * dt;
-      ped.angle = Math.atan2(ped.fleeY, ped.fleeX);
-    } else {
-      ped.x += Math.cos(ped.angle) * ped.speed * dt;
-      ped.y += Math.sin(ped.angle) * ped.speed * dt;
-      ped.walkPhase += dt * 6;
-      if (Math.random() < dt * 0.12) ped.angle += (Math.random() - 0.5) * 1.6;
-      if (solidAt(state.world, ped.x, ped.y)) {
-        ped.x -= Math.cos(ped.angle) * ped.speed * dt * 2;
-        ped.y -= Math.sin(ped.angle) * ped.speed * dt * 2;
-        ped.angle += Math.PI / 2;
-      }
-    }
-    ped.x = Math.max(150, Math.min(TUNING.worldWidth - 40, ped.x));
-    ped.y = Math.max(40, Math.min(TUNING.worldHeight - 40, ped.y));
-  }
-}
+// --- drawing people -------------------------------------------------------
 
-// --- Rendering ------------------------------------------------------------
-export function drawPerson(ctx, x, y, angle, shirt, skin, isPlayer, armour) {
+function drawPerson(ctx, x, y, angle, color, opts = {}) {
+  const big = opts.big ? 1.6 : 1;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath(); ctx.ellipse(2, 3, 13, 10, 0, 0, Math.PI * 2); ctx.fill();
-  // Body (shoulders) + head, top-down.
-  ctx.fillStyle = shirt;
-  ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.arc(4, 0, 6.5, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#22303c';
-  ctx.beginPath(); ctx.arc(6, 0, 4.5, 0, Math.PI * 2); ctx.fill(); // hair cap
-  // Gun in hand when shooting.
-  ctx.fillStyle = '#2c2f36';
-  ctx.fillRect(8, -2, 12, 4);
-  if (isPlayer) {
-    ctx.strokeStyle = '#e8b13c';
-    ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.stroke();
-    if (armour > 0) {
-      ctx.strokeStyle = '#7db8dc';
-      ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.stroke();
-    }
+  ctx.beginPath(); ctx.ellipse(0, 3, 10 * big, 7 * big, 0, 0, Math.PI * 2); ctx.fill();
+  // Body (drawn as a visible person, never a dot).
+  ctx.fillStyle = color;
+  ctx.beginPath(); ctx.arc(0, 0, 9 * big, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#f0c8a0'; // head
+  ctx.beginPath(); ctx.arc(5 * big, 0, 5.5 * big, 0, Math.PI * 2); ctx.fill();
+  if (opts.gun) {
+    ctx.strokeStyle = '#1c1c20'; ctx.lineWidth = 3 * big;
+    ctx.beginPath(); ctx.moveTo(8 * big, 0); ctx.lineTo(20 * big, 0); ctx.stroke();
+  }
+  if (opts.cop) {
+    ctx.fillStyle = '#20242e';
+    ctx.beginPath(); ctx.arc(5 * big, 0, 5.5 * big, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#3a6aff';
+    ctx.fillRect(-2, -8 * big, 12, 3);
   }
   ctx.restore();
 }
 
-export function drawHeli(ctx, heli, time) {
-  const bob = Math.sin(time * 2.2) * 4;
-  ctx.save();
-  ctx.translate(heli.x, heli.y + bob);
-  // Searchlight cone down toward the player.
-  const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 260);
-  grad.addColorStop(0, 'rgba(255,244,190,0.5)');
-  grad.addColorStop(1, 'rgba(255,244,190,0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath(); ctx.arc(0, 0, 260, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath(); ctx.ellipse(4, 6, 26, 18, 0, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = TUNING.colours.heli;
-  ctx.beginPath(); ctx.ellipse(0, 0, 24, 15, heli.angle, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = '#9aa5b1';
-  ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(30, 0); ctx.stroke();
-  ctx.fillStyle = '#ffe9a8';
-  ctx.beginPath(); ctx.arc(18, -4, 3, 0, Math.PI * 2); ctx.fill();
-  ctx.restore();
+export function drawActors(ctx, state, cam) {
+  const p = state.player;
+  // Pedestrians as visible people.
+  for (const ped of state.peds) {
+    if (ped.x < cam.x - 60 || ped.x > cam.x + 1340 || ped.y < cam.y - 60 || ped.y > cam.y + 860) continue;
+    drawPerson(ctx, ped.x, ped.y, ped.angle, ped.color, { panic: ped.panic > 0 });
+  }
+  // Mission enemies (gang / guards).
+  for (const e of state.enemies) {
+    if (e.dead) continue;
+    drawPerson(ctx, e.x, e.y, e.angle || 0, '#a83a3a', { gun: true, big: true });
+    // Health bar.
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(e.x - 18, e.y - 26, 36, 5);
+    ctx.fillStyle = '#ff5a5a';
+    ctx.fillRect(e.x - 18, e.y - 26, 36 * Math.max(0, e.health / 60), 5);
+  }
+  // Foot cops.
+  for (const cop of state.cops) {
+    if (cop.dead) continue;
+    drawPerson(ctx, cop.x, cop.y, cop.angle || 0, '#20242e', { cop: true, big: true });
+  }
+  // The player on foot — large, with a gun, never a dot.
+  if (p.onFoot) {
+    drawPerson(ctx, p.x, p.y, p.aimAngle || p.angle, '#e8b04b', { gun: true, big: true });
+    if (p.invuln > 0 && Math.floor(state.time * 10) % 2 === 0) {
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 20, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  // Helicopter + searchlight.
+  const h = state.heli;
+  if (h) {
+    ctx.save();
+    ctx.translate(h.x, h.y);
+    if (h.lit) {
+      const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, WANTED.heliSpotRadius);
+      grad.addColorStop(0, 'rgba(255,250,200,0.30)');
+      grad.addColorStop(1, 'rgba(255,250,200,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath(); ctx.arc(p.x - h.x, p.y - h.y, WANTED.heliSpotRadius, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,250,200,0.5)'; ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(p.x - h.x, p.y - h.y); ctx.stroke();
+    }
+    ctx.rotate(h.angle);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(2, 4, 26, 14, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#2a2e38';
+    ctx.beginPath(); ctx.ellipse(0, 0, 22, 11, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#c8c8d0'; ctx.lineWidth = 2;
+    const rotor = state.time * 22;
+    ctx.beginPath(); ctx.moveTo(Math.cos(rotor) * 30, Math.sin(rotor) * 6); ctx.lineTo(-Math.cos(rotor) * 30, -Math.sin(rotor) * 6); ctx.stroke();
+    ctx.restore();
+  }
+  // Bullet tracers and muzzle flashes.
+  for (const t of state.tracers) {
+    ctx.strokeStyle = t.color; ctx.lineWidth = 3;
+    ctx.globalAlpha = Math.min(1, t.t / 0.09);
+    ctx.beginPath(); ctx.moveTo(t.x1, t.y1); ctx.lineTo(t.x2, t.y2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  for (const f of state.flashes) {
+    ctx.fillStyle = 'rgba(255,220,120,0.95)';
+    ctx.beginPath(); ctx.arc(f.x, f.y, 10 + Math.random() * 6, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.arc(f.x, f.y, 5, 0, Math.PI * 2); ctx.fill();
+  }
 }

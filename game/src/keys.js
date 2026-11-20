@@ -1,94 +1,68 @@
-// keys.js — keyboard + mouse input mapping. One job: input.
-// Reads the DOM events and exposes a plain input snapshot the game loop
-// consumes: { up, down, left, right, run, handbrake, shoot, punch, ... }
-// plus edge-triggered `pressed` keys consumed once per frame.
-import { TUNING } from './tuning.js';
+// keys.js — keyboard and mouse input. One job: turn device events into a
+// single input object the sim reads every frame. Edge-triggered actions
+// (pressed this frame) are consumed by boot.js after each step.
 
-export function createInput(canvas) {
-  const input = {
+export function createInput() {
+  return {
     up: false, down: false, left: false, right: false,
-    run: false, handbrake: false, shoot: false,
-    pressed: {},           // edge-triggered keys, cleared each frame
-    mouse: { x: 0, y: 0, down: false, worldX: 0, worldY: 0 },
+    handbrake: false, nitro: false, run: false,
+    holdE: false, shoot: false,
+    aimX: 0, aimY: 0, mouseX: 0, mouseY: 0,
+    pressed: {}, // key -> true for exactly one frame
+    anyKey: false,
   };
+}
 
-  const KEYMAP = {
-    KeyW: 'up', ArrowUp: 'up',
-    KeyS: 'down', ArrowDown: 'down',
-    KeyA: 'left', ArrowLeft: 'left',
-    KeyD: 'right', ArrowRight: 'right',
-    ShiftLeft: 'run', ShiftRight: 'run',
-    Space: 'handbrake',
-  };
+const KEYMAP = {
+  KeyW: 'up', ArrowUp: 'up',
+  KeyS: 'down', ArrowDown: 'down',
+  KeyA: 'left', ArrowLeft: 'left',
+  KeyD: 'right', ArrowRight: 'right',
+  Space: 'handbrake',
+  ShiftLeft: 'nitro', ShiftRight: 'nitro',
+  KeyE: 'holdE',
+};
 
-  function onKeyDown(e) {
-    if (e.code === 'Space') e.preventDefault();
+export function attachInput(input, canvas, callbacks) {
+  const onKeyDown = (e) => {
+    if (e.repeat) return;
     const mapped = KEYMAP[e.code];
-    if (mapped) input[mapped] = true;
-    if (!e.repeat) input.pressed[e.code] = true;
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
-  }
-
-  function onKeyUp(e) {
+    if (mapped) { input[mapped] = true; e.preventDefault(); }
+    input.pressed[e.code] = true;
+    input.anyKey = true;
+    if (callbacks.onKey) callbacks.onKey(e.code);
+  };
+  const onKeyUp = (e) => {
     const mapped = KEYMAP[e.code];
     if (mapped) input[mapped] = false;
-  }
-
-  function onMouseMove(e) {
+  };
+  const onMouseMove = (e) => {
     const rect = canvas.getBoundingClientRect();
-    input.mouse.x = e.clientX - rect.left;
-    input.mouse.y = e.clientY - rect.top;
-  }
-
-  function onMouseDown(e) {
-    if (e.button === 0) {
-      input.mouse.down = true;
-      input.shoot = true;
-      input.pressed.MouseLeft = true;
-    }
-  }
-
-  function onMouseUp(e) {
-    if (e.button === 0) {
-      input.mouse.down = false;
-      input.shoot = false;
-    }
-  }
-
+    input.mouseX = e.clientX - rect.left;
+    input.mouseY = e.clientY - rect.top;
+    if (callbacks.onMouse) callbacks.onMouse(input.mouseX, input.mouseY);
+  };
+  const onMouseDown = (e) => {
+    if (e.button === 0) input.shoot = true;
+    if (callbacks.onMouseDown) callbacks.onMouseDown(e.button);
+  };
+  const onMouseUp = (e) => {
+    if (e.button === 0) input.shoot = false;
+  };
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   canvas.addEventListener('mousemove', onMouseMove);
   canvas.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mouseup', onMouseUp);
-
-  // Convert the mouse position into world coordinates for aiming.
-  input.updateMouseWorld = function updateMouseWorld(camera, scale) {
-    input.mouse.worldX = camera.x + input.mouse.x / scale;
-    input.mouse.worldY = camera.y + input.mouse.y / scale;
+  return () => {
+    window.removeEventListener('keydown', onKeyDown);
+    window.removeEventListener('keyup', onKeyUp);
+    canvas.removeEventListener('mousemove', onMouseMove);
+    canvas.removeEventListener('mousedown', onMouseDown);
+    window.removeEventListener('mouseup', onMouseUp);
   };
-
-  // Call once per frame after the game has read the input.
-  input.endFrame = function endFrame() {
-    input.pressed = {};
-  };
-
-  input.wasPressed = function wasPressed(code) {
-    return !!input.pressed[code];
-  };
-
-  return input;
 }
 
-// Human-readable control list, shown on the title screen and in the HUD hint.
-export const CONTROL_LIST = [
-  ['WASD / Arrows', 'Move on foot · drive the car'],
-  ['E', 'Enter / exit / steal a car'],
-  ['Mouse + Click', 'Aim and shoot the pistol'],
-  ['F', 'Punch'],
-  ['Space', 'Handbrake drift (pays cash)'],
-  ['Shift', 'Run on foot'],
-  ['M', 'Start the next mission'],
-  ['R', 'Radio on / off · next station'],
-  ['P / Esc', 'Pause / back to title'],
-  ['C', 'Save game (checkpoint)'],
-];
+// True once for the frame the key went down; boot.js clears it each step.
+export function wasPressed(input, code) { return !!input.pressed[code]; }
+export function clearPressed(input) { input.pressed = {}; input.anyKey = false; }

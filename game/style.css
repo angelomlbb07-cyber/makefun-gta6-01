@@ -1,54 +1,37 @@
-/* style.css — page shell for SOLMAR. One job: present the canvas. */
-* { box-sizing: border-box; }
-
+/* SOLMAR — page chrome around the game canvas. The game itself draws
+   everything on the canvas; this file only centres it and keeps the page
+   dark so the sunset palette of the title screen reads. */
 html, body {
   margin: 0;
   padding: 0;
-  background: #10131c;
-  color: #f5f0e6;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  min-height: 100vh;
+  background: #0c0e16;
+  color: #e8e8f0;
+  font-family: Arial, Helvetica, sans-serif;
+  height: 100%;
 }
-
-body {
+#wrap {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  min-height: 100vh;
   gap: 10px;
   padding: 12px;
+  box-sizing: border-box;
 }
-
-#stage {
-  width: min(1280px, 100%);
-  border: 3px solid #e8b13c;
-  border-radius: 10px;
-  overflow: hidden;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
-  background: #0a0e18;
-}
-
 #game {
-  display: block;
-  width: 100%;
+  width: min(1280px, 96vw);
   height: auto;
-  cursor: crosshair;
+  aspect-ratio: 1280 / 800;
+  background: #1a2030;
+  border: 2px solid #2a2e3e;
+  border-radius: 8px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  display: block;
 }
-
 #help {
-  margin: 0;
-  font-size: 14px;
-  color: #b8b8ae;
+  font-size: 13px;
+  color: #9a9ab0;
   text-align: center;
-}
-
-#fallback {
-  padding: 40px;
-  text-align: center;
-}
-
-#fallback h1 {
-  color: #e8b13c;
-  font-size: 48px;
-  margin: 0 0 8px;
+  max-width: 1280px;
 }

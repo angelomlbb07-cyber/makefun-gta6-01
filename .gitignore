@@ -1,5 +1,6 @@
-node_modules/
+# SOLMAR — build outputs and editor junk stay out of the repo.
 out/
 out2/
+node_modules/
 *.log
 .DS_Store
