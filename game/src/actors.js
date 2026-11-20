@@ -1,428 +1,421 @@
-// SOLMAR actors — the player on foot, pedestrians, enemy gunmen, the
-// police helicopter, bullets, muzzle flashes and particles.
+// actors.js — people: the player on foot, pedestrians, police, thugs,
+// and the police helicopter. One job: actors and combat.
+import { TUNING } from './tuning.js';
+import { makeRng, resolveCircleCollision, solidAt } from './world.js';
+import { addPopup, addCrashSparks } from './vehicles.js';
 
-import { WORLD_W, WORLD_H, clamp, dist, angleTo, angleDiff, pushOutOfRect, mulberry32 } from './core.js';
-import { TUNE } from './tuning.js';
-import { isOnRoad, isWater } from './world.js';
-import { addWanted, addFloat, explodeCar, nearestCar } from './vehicles.js';
+const PED_SHIRTS = ['#d84a6a', '#4a8ad8', '#5ab06a', '#e8e8e8', '#c97e4a', '#8a6ad8', '#3aa88a'];
+const PED_SKINS = ['#e8b88a', '#c98a5a', '#8a5a3a', '#f0c8a0'];
 
-export function spawnPeds(G, city, n) {
-  const rng = mulberry32(99);
-  while (G.peds.length < n) {
-    const x = 320 + rng() * (WORLD_W - 420);
-    const y = 80 + rng() * (WORLD_H - 160);
-    if (dist(x, y, G.player.x, G.player.y) < 320) continue;
-    if (isWater(x, y, city)) continue;
-    G.peds.push({
-      x, y, angle: rng() * Math.PI * 2,
-      speed: 45 + rng() * 35, r: 12,
-      color: ['#e07a5f', '#81b29a', '#f2cc8f', '#6d9dc5', '#c08497'][Math.floor(rng() * 5)],
-      flee: 0, walkT: rng() * 4,
-    });
+export function makePlayer(x, y) {
+  return {
+    kind: 'player', x, y, angle: -Math.PI / 2, speed: 0,
+    health: 100, armour: 0, ammo: TUNING.pistolAmmoStart,
+    onFoot: true, punchCooldown: 0, shootCooldown: 0, moving: false,
+  };
+}
+
+export function makePed(x, y, rng) {
+  return {
+    kind: 'ped', x, y, angle: rng() * Math.PI * 2, speed: TUNING.pedSpeed * (0.7 + rng() * 0.6),
+    shirt: PED_SHIRTS[Math.floor(rng() * PED_SHIRTS.length)],
+    skin: PED_SKINS[Math.floor(rng() * PED_SKINS.length)],
+    walkPhase: rng() * 6.28, panic: 0, fleeX: 0, fleeY: 0,
+  };
+}
+
+export function spawnPeds(world, count, nearX, nearY) {
+  const rng = makeRng(424242 + count);
+  const peds = [];
+  let guard = 0;
+  while (peds.length < count && guard++ < count * 40) {
+    const x = nearX + (rng() - 0.5) * 1600;
+    const y = nearY + (rng() - 0.5) * 1200;
+    if (x < 200 || x > TUNING.worldWidth - 100 || y < 100 || y > TUNING.worldHeight - 100) continue;
+    if (solidAt(world, x, y)) continue;
+    peds.push(makePed(x, y, rng));
+  }
+  return peds;
+}
+
+export function makeCop(x, y, inCar) {
+  return {
+    kind: 'cop', x, y, angle: 0, speed: 0, health: TUNING.copHealth,
+    inCar: !!inCar, shootCooldown: 1 + Math.random(), punchCooldown: 0,
+    car: null, dead: false,
+  };
+}
+
+export function makeThug(x, y) {
+  return {
+    kind: 'thug', x, y, angle: 0, speed: 0, health: TUNING.thugHealth,
+    shootCooldown: 1.5 + Math.random(), dead: false, alerted: false,
+  };
+}
+
+export function makeHeli(x, y) {
+  return { kind: 'heli', x, y, angle: 0, speed: 0, searchAngle: 0, shootCooldown: 2.5 };
+}
+
+// --- Player on foot -------------------------------------------------------
+export function updatePlayerOnFoot(player, input, world, dt, state) {
+  const T = TUNING;
+  const mx = (input.right ? 1 : 0) - (input.left ? 1 : 0);
+  const my = (input.down ? 1 : 0) - (input.up ? 1 : 0);
+  const running = input.run;
+  const speed = running ? T.runSpeed : T.walkSpeed;
+  player.moving = mx !== 0 || my !== 0;
+  if (player.moving) {
+    const len = Math.hypot(mx, my);
+    player.x += (mx / len) * speed * dt;
+    player.y += (my / len) * speed * dt;
+    player.angle = Math.atan2(my, mx);
+    if (resolveCircleCollision(world, player, T.playerRadius) || solidAt(world, player.x, player.y)) {
+      player.x -= (mx / len) * speed * dt;
+      player.y -= (my / len) * speed * dt;
+    }
+  }
+  player.x = Math.max(TUNING.waterX + 16, Math.min(TUNING.worldWidth - 16, player.x));
+  player.y = Math.max(16, Math.min(TUNING.worldHeight - 16, player.y));
+  player.punchCooldown = Math.max(0, player.punchCooldown - dt);
+  player.shootCooldown = Math.max(0, player.shootCooldown - dt);
+  // Aim at the mouse when shooting; otherwise face the walk direction.
+  if (state.mouse.down || input.shoot) {
+    player.angle = Math.atan2(state.mouse.worldY - player.y, state.mouse.worldX - player.x);
   }
 }
 
-export function updatePeds(G, dt, city) {
-  for (const p of G.peds) {
-    if (p.flee > 0) {
-      p.flee -= dt;
-      const a = Math.atan2(p.y - G.player.y, p.x - G.player.x);
-      p.x += Math.cos(a) * 190 * dt;
-      p.y += Math.sin(a) * 190 * dt;
-    } else {
-      p.walkT -= dt;
-      if (p.walkT <= 0) {
-        p.walkT = 2 + Math.random() * 4;
-        p.angle = Math.random() * Math.PI * 2;
-      }
-      p.x += Math.cos(p.angle) * p.speed * dt;
-      p.y += Math.sin(p.angle) * p.speed * dt;
-    }
-    p.x = clamp(p.x, 300, WORLD_W - 40);
-    p.y = clamp(p.y, 40, WORLD_H - 40);
-    if (isWater(p.x, p.y, city)) {
-      p.x = clamp(p.x, 300, WORLD_W - 40);
-      p.angle += Math.PI;
-    }
-    for (const b of city.buildings) {
-      if (p.x < b.x - 30 || p.x > b.x + b.w + 30 || p.y < b.y - 30 || p.y > b.y + b.h + 30) continue;
-      pushOutOfRect(p, b);
+// Punch: damages the nearest thug / cop / ped in range, in front of the player.
+export function playerPunch(state) {
+  const p = state.player;
+  if (p.punchCooldown > 0 || !p.onFoot) return false;
+  p.punchCooldown = TUNING.punchCooldown;
+  let hitAny = false;
+  const targets = [...state.thugs, ...state.cops];
+  for (const t of targets) {
+    if (t.dead) continue;
+    const dx = t.x - p.x, dy = t.y - p.y;
+    const d = Math.hypot(dx, dy);
+    if (d < TUNING.punchRange + 14) {
+      t.health -= TUNING.punchDamage;
+      state.stats.punches += 1;
+      addPopup(state, t.x, t.y - 26, `-${TUNING.punchDamage}`, '#ffffff');
+      if (t.health <= 0) killActor(state, t);
+      hitAny = true;
     }
   }
-  // Keep the streets populated.
-  if (G.peds.length < TUNE.maxPeds) spawnPeds(G, city, TUNE.maxPeds);
+  return hitAny;
 }
 
-export function drawPeds(ctx, G, cam, view) {
-  for (const p of G.peds) {
-    if (p.x < cam.x - 30 || p.x > cam.x + view.w + 30 || p.y < cam.y - 30 || p.y > cam.y + view.h + 30) continue;
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(p.x + 2, p.y + 3, 11, 9, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = p.color;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 11, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#2b2118';
-    ctx.beginPath();
-    ctx.arc(p.x, p.y - 3, 5, 0, Math.PI * 2);
-    ctx.fill();
+// Shoot: hitscan with a tracer + muzzle flash; consumes ammo.
+export function playerShoot(state) {
+  const p = state.player;
+  if (p.shootCooldown > 0 || !p.onFoot || p.ammo <= 0) return false;
+  p.shootCooldown = TUNING.pistolCooldown;
+  p.ammo -= 1;
+  state.stats.shots += 1;
+  const angle = p.angle;
+  const range = TUNING.pistolRange;
+  let hit = null, hitD = range;
+  const targets = [...state.thugs, ...state.cops];
+  for (const t of targets) {
+    if (t.dead) continue;
+    const dx = t.x - p.x, dy = t.y - p.y;
+    const along = dx * Math.cos(angle) + dy * Math.sin(angle);
+    if (along < 0 || along > range) continue;
+    const perp = Math.abs(-dx * Math.sin(angle) + dy * Math.cos(angle));
+    if (perp < 20 && along < hitD) { hit = t; hitD = along; }
   }
-}
-
-export function spawnFoes(G, x, y, n, hp) {
-  for (let i = 0; i < n; i++) {
-    G.foes.push({
-      x: x + (Math.random() - 0.5) * 160,
-      y: y + (Math.random() - 0.5) * 160,
-      angle: 0, r: 14, hp: hp || 100, maxHp: hp || 100,
-      speed: 120 + Math.random() * 40,
-      fireCd: 1 + Math.random(), burst: 0,
-      color: '#8a2f2f',
-    });
-  }
-}
-
-export function updateFoes(G, dt, city, S) {
-  for (const f of G.foes) {
-    if (f.hp <= 0) continue;
-    const d = dist(f.x, f.y, G.player.x, G.player.y);
-    f.angle = angleTo(f.x, f.y, G.player.x, G.player.y);
-    if (d > 260) {
-      f.x += Math.cos(f.angle) * f.speed * dt;
-      f.y += Math.sin(f.angle) * f.speed * dt;
-    } else if (d < 140) {
-      f.x -= Math.cos(f.angle) * f.speed * 0.6 * dt;
-      f.y -= Math.sin(f.angle) * f.speed * 0.6 * dt;
-    }
-    for (const b of city.buildings) {
-      if (f.x < b.x - 30 || f.x > b.x + b.w + 30 || f.y < b.y - 30 || f.y > b.y + b.h + 30) continue;
-      pushOutOfRect(f, b);
-    }
-    f.fireCd -= dt;
-    if (f.fireCd <= 0 && d < 520) {
-      f.fireCd = 1.1 + Math.random() * 0.9;
-      fireBullet(G, f.x, f.y, f.angle + (Math.random() - 0.5) * 0.22, false, S);
-      if (S) S.foeShot();
-    }
-  }
-  G.foes = G.foes.filter((f) => f.hp > 0);
-}
-
-export function drawFoes(ctx, G, cam, view) {
-  for (const f of G.foes) {
-    if (f.x < cam.x - 30 || f.x > cam.x + view.w + 30 || f.y < cam.y - 30 || f.y > cam.y + view.h + 30) continue;
-    ctx.fillStyle = 'rgba(0,0,0,0.3)';
-    ctx.beginPath();
-    ctx.ellipse(f.x + 2, f.y + 3, 13, 11, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = f.color;
-    ctx.beginPath();
-    ctx.arc(f.x, f.y, 13, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = '#1c1c1c';
-    ctx.beginPath();
-    ctx.arc(f.x, f.y - 3, 6, 0, Math.PI * 2);
-    ctx.fill();
-    // Gun barrel + health bar.
-    ctx.strokeStyle = '#222';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(f.x, f.y);
-    ctx.lineTo(f.x + Math.cos(f.angle) * 22, f.y + Math.sin(f.angle) * 22);
-    ctx.stroke();
-    ctx.fillStyle = '#222';
-    ctx.fillRect(f.x - 14, f.y - 24, 28, 5);
-    ctx.fillStyle = '#ff5a4d';
-    ctx.fillRect(f.x - 14, f.y - 24, 28 * (f.hp / f.maxHp), 5);
-  }
-}
-
-export function fireBullet(G, x, y, angle, friendly, S) {
-  G.bullets.push({
-    x, y, angle,
-    vx: Math.cos(angle) * TUNE.bulletSpeed,
-    vy: Math.sin(angle) * TUNE.bulletSpeed,
-    life: TUNE.bulletRange / TUNE.bulletSpeed,
-    friendly,
+  const endX = p.x + Math.cos(angle) * hitD;
+  const endY = p.y + Math.sin(angle) * hitD;
+  state.tracers.push({ x1: p.x, y1: p.y, x2: endX, y2: endY, life: TUNING.tracerLife });
+  state.muzzle = { x: p.x + Math.cos(angle) * 20, y: p.y + Math.sin(angle) * 20, life: 0.07 };
+  state.particles.push({
+    x: state.muzzle.x, y: state.muzzle.y, vx: 0, vy: 0,
+    life: 0.07, maxLife: 0.07, color: '#ffe9a8', size: 9,
   });
-  // Muzzle flash.
-  for (let i = 0; i < 4; i++) {
-    G.parts.push({
-      x: x + Math.cos(angle) * 20, y: y + Math.sin(angle) * 20,
-      vx: Math.cos(angle + (Math.random() - 0.5)) * 260,
-      vy: Math.sin(angle + (Math.random() - 0.5)) * 260,
-      life: 0.12, max: 0.12, size: 3 + Math.random() * 3,
-      color: '#ffd94d',
+  if (hit) {
+    hit.health -= TUNING.pistolDamage;
+    state.stats.hits += 1;
+    state.particles.push({
+      x: endX, y: endY, vx: 0, vy: 0, life: 0.3, maxLife: 0.3, color: '#ff5a4d', size: 6,
+    });
+    if (hit.health <= 0) killActor(state, hit);
+    else if (hit.kind === 'thug') hit.alerted = true;
+  }
+  // Firing in public draws the law.
+  raiseWanted(state, 0.4);
+  if (state.sound) state.sound.shoot();
+  return true;
+}
+
+export function killActor(state, actor) {
+  actor.dead = true;
+  addPopup(state, actor.x, actor.y - 26, actor.kind === 'thug' ? 'THUG DOWN +$40' : 'COP DOWN', '#ffb13c');
+  if (actor.kind === 'thug') {
+    state.cash += 40;
+    state.stats.thugsDown += 1;
+    raiseWanted(state, 0.6);
+    maybeDropPickup(state, actor.x, actor.y);
+  } else if (actor.kind === 'cop') {
+    raiseWanted(state, 1);
+    state.stats.copsDown += 1;
+  }
+  addCrashSparks(state, actor.x, actor.y);
+}
+
+export function maybeDropPickup(state, x, y) {
+  if (Math.random() < 0.4) {
+    state.pickups.push({
+      kind: Math.random() < 0.5 ? 'health' : 'armour',
+      x: x + (Math.random() - 0.5) * 30, y: y + (Math.random() - 0.5) * 30,
     });
   }
-  if (friendly) {
-    G.shotsFired++;
-    if (S) S.shot();
-  }
 }
 
-export function updateBullets(G, dt, city, S) {
-  for (const b of G.bullets) {
-    b.x += b.vx * dt;
-    b.y += b.vy * dt;
-    b.life -= dt;
-    // Walls stop bullets.
-    for (const bd of city.buildings) {
-      if (b.x > bd.x && b.x < bd.x + bd.w && b.y > bd.y && b.y < bd.y + bd.h) {
-        b.life = 0;
-        G.parts.push({
-          x: b.x, y: b.y, vx: 0, vy: 0, life: 0.2, max: 0.2, size: 4, color: '#c9c9c9',
-        });
-        break;
-      }
-    }
-    if (b.life <= 0) continue;
-    if (b.friendly) {
-      for (const f of G.foes) {
-        if (f.hp <= 0) continue;
-        if (dist(b.x, b.y, f.x, f.y) < 18) {
-          f.hp -= TUNE.pistolDamage;
-          b.life = 0;
-          G.shotsHit++;
-          addFloat(G, f.x, f.y - 22, '-' + TUNE.pistolDamage, '#ff8a7a');
-          if (f.hp <= 0) {
-            G.kills++;
-            addWanted(G, TUNE.wantedPerKill);
-            G.money += 40;
-            addFloat(G, f.x, f.y - 34, '+$40', '#ffd94d');
-            for (let i = 0; i < 10; i++) {
-              G.parts.push({
-                x: f.x, y: f.y,
-                vx: (Math.random() - 0.5) * 300, vy: (Math.random() - 0.5) * 300,
-                life: 0.4, max: 0.4, size: 4, color: '#c94f42',
-              });
-            }
-          }
-          break;
-        }
-      }
-      // Shooting a car damages it.
-      if (b.life > 0) {
-        for (const c of G.cars) {
-          if (c.dead || c.driver === 'player') continue;
-          if (dist(b.x, b.y, c.x, c.y) < 26) {
-            c.hp -= TUNE.pistolDamage;
-            b.life = 0;
-            if (c.hp <= 0) explodeCar(G, c, S);
-            break;
-          }
-        }
-      }
-      // Shooting a pedestrian is a crime.
-      if (b.life > 0) {
-        for (const p of G.peds) {
-          if (dist(b.x, b.y, p.x, p.y) < 16) {
-            b.life = 0;
-            p.flee = 6;
-            addWanted(G, TUNE.wantedPerShot);
-            break;
-          }
-        }
-      }
-    } else {
-      // Enemy fire: the player, or their car, takes the hit.
-      const p = G.player;
-      const target = p.onFoot ? { x: p.x, y: p.y, r: 16 } : { x: p.x, y: p.y, r: 26 };
-      if (dist(b.x, b.y, target.x, target.y) < target.r) {
-        b.life = 0;
-        hurtPlayer(G, TUNE.foeDamage, S);
-      }
-    }
-  }
-  G.bullets = G.bullets.filter((b) => b.life > 0);
-}
-
-export function hurtPlayer(G, dmg, S) {
-  const p = G.player;
-  if (p.hurtT > 0) return;
-  p.hurtT = 0.5;
-  let left = dmg;
-  if (G.armour > 0) {
-    const absorbed = Math.min(G.armour, left);
-    G.armour -= absorbed;
-    left -= absorbed;
-  }
-  G.health -= left;
-  if (G.health <= 0) {
-    G.health = 0;
-    G.mode = 'over';
-  }
-}
-
-export function updatePlayerOnFoot(G, dt, city, S) {
-  const p = G.player;
-  const keys = G.keys;
-  let mx = 0;
-  let my = 0;
-  if (keys.KeyW || keys.ArrowUp) my -= 1;
-  if (keys.KeyS || keys.ArrowDown) my += 1;
-  if (keys.KeyA || keys.ArrowLeft) mx -= 1;
-  if (keys.KeyD || keys.ArrowRight) mx += 1;
-  const len = Math.hypot(mx, my) || 1;
-  const running = keys.ShiftLeft || keys.ShiftRight;
-  const speed = running ? TUNE.runSpeed : TUNE.walkSpeed;
-  p.moving = mx !== 0 || my !== 0;
-  p.x += (mx / len) * speed * dt * (p.moving ? 1 : 0);
-  p.y += (my / len) * speed * dt * (p.moving ? 1 : 0);
-  p.x = clamp(p.x, 170, WORLD_W - 40);
-  p.y = clamp(p.y, 40, WORLD_H - 40);
-  // Aim at the mouse (world coordinates).
-  p.aim = Math.atan2(G.mouse.wy - p.y, G.mouse.wx - p.x);
-  p.angle = p.aim;
-  // Collide with buildings.
-  for (const b of city.buildings) {
-    if (p.x < b.x - 30 || p.x > b.x + b.w + 30 || p.y < b.y - 30 || p.y > b.y + b.h + 30) continue;
-    pushOutOfRect(p, b);
-  }
-  // Shooting.
-  p.fireCd -= dt;
-  if (p.reloadT > 0) {
-    p.reloadT -= dt;
-    if (p.reloadT <= 0) {
-      const take = Math.min(24 - G.ammo, G.reserveAmmo);
-      G.ammo += take;
-      G.reserveAmmo -= take;
-    }
-  }
-  if (G.mouse.down && p.fireCd <= 0 && p.reloadT <= 0) {
-    if (G.ammo > 0) {
-      G.ammo--;
-      p.fireCd = 0.16;
-      fireBullet(G, p.x + Math.cos(p.aim) * 20, p.y + Math.sin(p.aim) * 20, p.aim, true, S);
-      addWanted(G, TUNE.wantedPerShot * 0.4);
-      // Nearby pedestrians flee from gunfire.
-      for (const ped of G.peds) {
-        if (dist(ped.x, ped.y, p.x, p.y) < 300) ped.flee = 4;
-      }
-    } else if (G.reserveAmmo > 0) {
-      p.reloadT = 1.1;
-    }
-  }
-  if (keys.KeyR && G.ammo < 24 && G.reserveAmmo > 0 && p.reloadT <= 0) {
-    p.reloadT = 1.1;
-  }
-  if (p.hurtT > 0) p.hurtT -= dt;
-  if (S) S.setEngine(0, false);
-}
-
-export function updateParticles(G, dt) {
-  for (const pt of G.parts) {
-    pt.x += pt.vx * dt;
-    pt.y += pt.vy * dt;
-    pt.vx *= 0.92;
-    pt.vy *= 0.92;
-    pt.life -= dt;
-  }
-  G.parts = G.parts.filter((pt) => pt.life > 0);
-  for (const f of G.floats) {
-    f.y -= 34 * dt;
-    f.life -= dt;
-  }
-  G.floats = G.floats.filter((f) => f.life > 0);
-}
-
-export function drawBullets(ctx, G) {
-  for (const b of G.bullets) {
-    ctx.strokeStyle = '#ffe9a8';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(b.x - b.vx * 0.02, b.y - b.vy * 0.02);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-  }
-}
-
-export function drawParticles(ctx, G) {
-  for (const pt of G.parts) {
-    ctx.globalAlpha = clamp(pt.life / pt.max, 0, 1);
-    ctx.fillStyle = pt.color;
-    ctx.fillRect(pt.x - pt.size / 2, pt.y - pt.size / 2, pt.size, pt.size);
-  }
-  ctx.globalAlpha = 1;
-  for (const f of G.floats) {
-    ctx.globalAlpha = clamp(f.life / f.max, 0, 1);
-    ctx.fillStyle = f.color;
-    ctx.font = 'bold 17px Arial';
-    ctx.textAlign = 'center';
-    ctx.fillText(f.text, f.x, f.y);
-  }
-  ctx.globalAlpha = 1;
-  ctx.textAlign = 'left';
-}
-
-export function drawPlayer(ctx, G) {
-  const p = G.player;
+export function collectPickups(state) {
+  const p = state.player;
   if (!p.onFoot) return;
-  ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(p.x + 2, p.y + 3, 13, 11, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // Body: teal jacket, dark jeans.
-  ctx.fillStyle = '#1f8a7a';
-  ctx.beginPath();
-  ctx.arc(p.x, p.y, 13, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#f2c14e';
-  ctx.beginPath();
-  ctx.arc(p.x, p.y - 3, 6, 0, Math.PI * 2);
-  ctx.fill();
-  // Gun barrel toward the aim.
-  ctx.strokeStyle = '#1c1c1c';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(p.x, p.y);
-  ctx.lineTo(p.x + Math.cos(p.aim) * 24, p.y + Math.sin(p.aim) * 24);
-  ctx.stroke();
-  if (p.hurtT > 0) {
-    ctx.strokeStyle = 'rgba(255,60,40,0.8)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, 18, 0, Math.PI * 2);
-    ctx.stroke();
+  for (const pk of state.pickups) {
+    if (pk.taken) continue;
+    if (Math.hypot(pk.x - p.x, pk.y - p.y) < TUNING.pickupRadius) {
+      pk.taken = true;
+      if (pk.kind === 'health') {
+        p.health = Math.min(100, p.health + TUNING.healthPickupHeal);
+        addPopup(state, p.x, p.y - 30, `+${TUNING.healthPickupHeal} HEALTH`, '#7ddc8a');
+      } else {
+        p.armour = Math.min(100, p.armour + TUNING.armourPickupAmount);
+        addPopup(state, p.x, p.y - 30, `+${TUNING.armourPickupAmount} ARMOUR`, '#7db8dc');
+      }
+    }
+  }
+  state.pickups = state.pickups.filter((pk) => !pk.taken);
+}
+
+// Damage the player, armour absorbing first.
+export function damagePlayer(state, amount) {
+  const p = state.player;
+  const absorbed = Math.min(p.armour, amount);
+  p.armour -= absorbed;
+  p.health -= (amount - absorbed);
+  if (p.health <= 0) {
+    p.health = 0;
+    state.playerDead = true;
   }
 }
 
-export function drawHeli(ctx, G, cam, view) {
-  const h = G.heli;
-  if (!h) return;
-  if (h.x < cam.x - 120 || h.x > cam.x + view.w + 120 || h.y < cam.y - 120 || h.y > cam.y + view.h + 120) return;
-  // Searchlight cone onto the player.
-  ctx.fillStyle = 'rgba(255, 250, 200, 0.10)';
-  ctx.beginPath();
-  ctx.moveTo(h.x, h.y);
-  ctx.lineTo(G.player.x - 60, G.player.y - 40);
-  ctx.lineTo(G.player.x + 60, G.player.y + 40);
-  ctx.closePath();
-  ctx.fill();
+// --- Wanted ---------------------------------------------------------------
+export function raiseWanted(state, amount) {
+  state.wanted = Math.min(TUNING.wantedMax, state.wanted + amount);
+  state.wantedWhole = Math.floor(state.wanted);
+  state.lastSeenT = state.time;
+}
+
+export function updateWanted(state, dt) {
+  const T = TUNING;
+  // Wanted decays only while no cop can see the player.
+  const seen = state.cops.some((c) => !c.dead && Math.hypot(c.x - state.player.x, c.y - state.player.y) < 420)
+    || (state.heli && Math.hypot(state.heli.x - state.player.x, state.heli.y - state.player.y) < 520);
+  if (seen) state.lastSeenT = state.time;
+  if (state.wanted > 0 && state.time - state.lastSeenT > T.wantedDecayDelay) {
+    state.wantedDecayT += dt;
+    if (state.wantedDecayT >= T.wantedDecayInterval) {
+      state.wantedDecayT = 0;
+      state.wanted = Math.max(0, state.wanted - 1);
+      state.wantedWhole = Math.floor(state.wanted);
+    }
+  } else {
+    state.wantedDecayT = 0;
+  }
+  // Keep the response matched to the stars.
+  const wantFoot = state.wantedWhole >= T.starsForFootCops ? Math.min(3 + state.wantedWhole, 8) : 0;
+  const wantCars = state.wantedWhole >= T.starsForPatrolCars ? Math.min(state.wantedWhole, 4) : 0;
+  const wantHeli = state.wantedWhole >= T.starsForHeli ? 1 : 0;
+  while (state.cops.filter((c) => !c.dead && !c.inCar).length < wantFoot) {
+    const a = Math.random() * Math.PI * 2;
+    state.cops.push(makeCop(
+      state.player.x + Math.cos(a) * T.copSpawnDistance,
+      state.player.y + Math.sin(a) * T.copSpawnDistance, false));
+  }
+  while (state.cops.filter((c) => !c.dead && c.inCar).length < wantCars) {
+    const a = Math.random() * Math.PI * 2;
+    const cop = makeCop(
+      state.player.x + Math.cos(a) * (T.copSpawnDistance + 160),
+      state.player.y + Math.sin(a) * (T.copSpawnDistance + 160), true);
+    const car = { kind: 'car', x: cop.x, y: cop.y, angle: a, model: 'Interceptor', color: TUNING.colours.police, len: 48, wid: 23, speed: 0, health: 100, traffic: false, steer: 0, drift: 0, dead: false, targetSpeed: TUNING.copCarSpeed, police: true };
+    cop.car = car;
+    state.cars.push(car);
+    state.cops.push(cop);
+  }
+  if (wantHeli && !state.heli) state.heli = makeHeli(state.player.x - 200, state.player.y - 300);
+  if (!wantHeli) state.heli = null;
+  if (state.heli) {
+    const h = state.heli;
+    const dx = state.player.x - h.x, dy = state.player.y - h.y;
+    const d = Math.hypot(dx, dy) || 1;
+    h.x += (dx / d) * TUNING.heliSpeed * dt;
+    h.y += (dy / d) * TUNING.heliSpeed * dt;
+    h.searchAngle = Math.atan2(dy, dx);
+    h.shootCooldown -= dt;
+    if (d < 380 && h.shootCooldown <= 0) {
+      h.shootCooldown = 2.2;
+      damagePlayer(state, TUNING.copShootDamage);
+      state.tracers.push({ x1: h.x, y1: h.y, x2: state.player.x, y2: state.player.y, life: 0.08 });
+    }
+  }
+}
+
+// --- Police / thug AI -----------------------------------------------------
+export function updateCops(state, dt) {
+  const p = state.player;
+  for (const cop of state.cops) {
+    if (cop.dead) continue;
+    const dx = p.x - cop.x, dy = p.y - cop.y;
+    const d = Math.hypot(dx, dy) || 1;
+    cop.angle = Math.atan2(dy, dx);
+    if (cop.inCar && cop.car && !cop.car.dead) {
+      const car = cop.car;
+      const wantAngle = Math.atan2(dy, dx);
+      let diff = wantAngle - car.angle;
+      while (diff > Math.PI) diff -= Math.PI * 2;
+      while (diff < -Math.PI) diff += Math.PI * 2;
+      car.angle += Math.max(-2.4 * dt, Math.min(2.4 * dt, diff));
+      car.speed = Math.min(TUNING.copCarSpeed, car.speed + 420 * dt);
+      car.x += Math.cos(car.angle) * car.speed * dt;
+      car.y += Math.sin(car.angle) * car.speed * dt;
+      cop.x = car.x; cop.y = car.y;
+      if (d < 60) { // ram the player
+        if (p.onFoot) damagePlayer(state, TUNING.copPunchDamage);
+        car.speed *= 0.4;
+      }
+      resolveCircleCollision(state.world, car, car.len / 2);
+    } else {
+      const speed = TUNING.copFootSpeed;
+      cop.x += (dx / d) * speed * dt;
+      cop.y += (dy / d) * speed * dt;
+      cop.shootCooldown -= dt;
+      cop.punchCooldown = Math.max(0, cop.punchCooldown - dt);
+      if (d < 34 && cop.punchCooldown <= 0) {
+        cop.punchCooldown = 0.9;
+        damagePlayer(state, TUNING.copPunchDamage);
+      } else if (d < 300 && d > 90 && cop.shootCooldown <= 0) {
+        cop.shootCooldown = 1.4;
+        damagePlayer(state, TUNING.copShootDamage);
+        state.tracers.push({ x1: cop.x, y1: cop.y, x2: p.x, y2: p.y, life: 0.08 });
+      }
+      resolveCircleCollision(state.world, cop, 13);
+    }
+  }
+  state.cops = state.cops.filter((c) => !c.dead || c.inCar);
+  // Drop corpses' cars out of the cop list cleanly.
+  state.cops = state.cops.filter((c) => !(c.dead && !c.inCar));
+}
+
+export function updateThugs(state, dt) {
+  const p = state.player;
+  for (const thug of state.thugs) {
+    if (thug.dead) continue;
+    const dx = p.x - thug.x, dy = p.y - thug.y;
+    const d = Math.hypot(dx, dy) || 1;
+    thug.angle = Math.atan2(dy, dx);
+    if (thug.alerted && d < 520) {
+      thug.shootCooldown -= dt;
+      if (d > 130) {
+        thug.x += (dx / d) * 120 * dt;
+        thug.y += (dy / d) * 120 * dt;
+      }
+      if (thug.shootCooldown <= 0) {
+        thug.shootCooldown = 1.1 + Math.random() * 0.5;
+        if (d < 480) {
+          damagePlayer(state, TUNING.thugShootDamage);
+          state.tracers.push({ x1: thug.x, y1: thug.y, x2: p.x, y2: p.y, life: 0.08 });
+          if (state.sound) state.sound.enemyShoot();
+        }
+      }
+      resolveCircleCollision(state.world, thug, 13);
+    }
+  }
+}
+
+// --- Pedestrians ----------------------------------------------------------
+export function updatePeds(state, dt) {
+  const p = state.player;
+  for (const ped of state.peds) {
+    const d = Math.hypot(ped.x - p.x, ped.y - p.y);
+    if (state.wantedWhole >= 2 && d < 220) {
+      // Panic: run away from the player.
+      ped.panic = 2;
+      ped.fleeX = ped.x - p.x; ped.fleeY = ped.y - p.y;
+    }
+    if (ped.panic > 0) {
+      ped.panic -= dt;
+      const len = Math.hypot(ped.fleeX, ped.fleeY) || 1;
+      ped.x += (ped.fleeX / len) * 150 * dt;
+      ped.y += (ped.fleeY / len) * 150 * dt;
+      ped.angle = Math.atan2(ped.fleeY, ped.fleeX);
+    } else {
+      ped.x += Math.cos(ped.angle) * ped.speed * dt;
+      ped.y += Math.sin(ped.angle) * ped.speed * dt;
+      ped.walkPhase += dt * 6;
+      if (Math.random() < dt * 0.12) ped.angle += (Math.random() - 0.5) * 1.6;
+      if (solidAt(state.world, ped.x, ped.y)) {
+        ped.x -= Math.cos(ped.angle) * ped.speed * dt * 2;
+        ped.y -= Math.sin(ped.angle) * ped.speed * dt * 2;
+        ped.angle += Math.PI / 2;
+      }
+    }
+    ped.x = Math.max(150, Math.min(TUNING.worldWidth - 40, ped.x));
+    ped.y = Math.max(40, Math.min(TUNING.worldHeight - 40, ped.y));
+  }
+}
+
+// --- Rendering ------------------------------------------------------------
+export function drawPerson(ctx, x, y, angle, shirt, skin, isPlayer, armour) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
-  ctx.beginPath();
-  ctx.ellipse(h.x + 3, h.y + 4, 26, 12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#2b2b2e';
-  ctx.beginPath();
-  ctx.ellipse(h.x, h.y, 24, 11, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = '#111';
+  ctx.beginPath(); ctx.ellipse(2, 3, 13, 10, 0, 0, Math.PI * 2); ctx.fill();
+  // Body (shoulders) + head, top-down.
+  ctx.fillStyle = shirt;
+  ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.arc(4, 0, 6.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#22303c';
+  ctx.beginPath(); ctx.arc(6, 0, 4.5, 0, Math.PI * 2); ctx.fill(); // hair cap
+  // Gun in hand when shooting.
+  ctx.fillStyle = '#2c2f36';
+  ctx.fillRect(8, -2, 12, 4);
+  if (isPlayer) {
+    ctx.strokeStyle = '#e8b13c';
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(0, 0, 15, 0, Math.PI * 2); ctx.stroke();
+    if (armour > 0) {
+      ctx.strokeStyle = '#7db8dc';
+      ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.stroke();
+    }
+  }
+  ctx.restore();
+}
+
+export function drawHeli(ctx, heli, time) {
+  const bob = Math.sin(time * 2.2) * 4;
+  ctx.save();
+  ctx.translate(heli.x, heli.y + bob);
+  // Searchlight cone down toward the player.
+  const grad = ctx.createRadialGradient(0, 0, 10, 0, 0, 260);
+  grad.addColorStop(0, 'rgba(255,244,190,0.5)');
+  grad.addColorStop(1, 'rgba(255,244,190,0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath(); ctx.arc(0, 0, 260, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.35)';
+  ctx.beginPath(); ctx.ellipse(4, 6, 26, 18, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = TUNING.colours.heli;
+  ctx.beginPath(); ctx.ellipse(0, 0, 24, 15, heli.angle, 0, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = '#9aa5b1';
   ctx.lineWidth = 3;
-  const rot = G.time * 22;
-  ctx.beginPath();
-  ctx.moveTo(h.x - Math.cos(rot) * 34, h.y - Math.sin(rot) * 34);
-  ctx.lineTo(h.x + Math.cos(rot) * 34, h.y + Math.sin(rot) * 34);
-  ctx.stroke();
-  ctx.fillStyle = '#ff3b30';
-  ctx.beginPath();
-  ctx.arc(h.x, h.y, 4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 11px Arial';
-  ctx.textAlign = 'center';
-  ctx.fillText('POLICE', h.x, h.y - 18);
-  ctx.textAlign = 'left';
+  ctx.beginPath(); ctx.moveTo(-30, 0); ctx.lineTo(30, 0); ctx.stroke();
+  ctx.fillStyle = '#ffe9a8';
+  ctx.beginPath(); ctx.arc(18, -4, 3, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
 }

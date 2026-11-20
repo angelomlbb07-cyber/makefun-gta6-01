@@ -3,15 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SOLMAR — A 2D Open-World Crime Story</title>
-<link rel="icon" href="data:,">
+<title>SOLMAR — A Sun-Soaked Open-World Crime Story</title>
 <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-<div id="wrap">
-  <canvas id="game" width="1280" height="800" tabindex="0"></canvas>
-  <p id="help">SOLMAR — WASD move &amp; drive &middot; mouse aim, click to shoot &middot; F enter/exit car &middot; R reload &middot; Q radio &middot; Esc pause. Click the game once to enable sound.</p>
-</div>
+<main id="stage">
+  <canvas id="game" width="1280" height="800"></canvas>
+  <div id="fallback" hidden>
+    <h1>SOLMAR</h1>
+    <p>This game needs JavaScript and a canvas-capable browser.</p>
+  </div>
+</main>
+<p id="help">WASD move / drive &middot; E enter a car &middot; Click shoot &middot; F punch &middot; Space handbrake &middot; M mission &middot; C save &middot; P pause</p>
 <script type="module" src="./src/boot.js"></script>
 </body>
 </html>

@@ -1,77 +1,61 @@
-# SOLMAR — A 2D Open-World Crime Story
+# SOLMAR — A Sun-Soaked Open-World Crime Story
 
-![Make GTA 6](https://make.fun/badge/gta6-01.svg)
-![Rank](https://make.fun/badge/gta6-01/angelomlbb07-cyber/makefun-gta6-01/rank.svg)
-![Reward](https://make.fun/badge/gta6-01/angelomlbb07-cyber/makefun-gta6-01/reward.svg)
+[![make.fun build](https://img.shields.io/badge/make.fun-build-passing-brightgreen)](https://make.fun/bounty/gta6-01)
+[![make.fun bounty](https://img.shields.io/badge/make.fun-bounty-gta6--01-blue)](https://make.fun/bounty/gta6-01)
+[![make.fun entry](https://img.shields.io/badge/make.fun-entry-SOLMAR-orange)](https://make.fun/bounty/gta6-01)
 
-An original 2D top-down open-world crime game, built for the
-[Make GTA 6](https://make.fun/bounty/gta6-01) bounty on make.fun.
-Solmar is a sun-soaked coastal city of our own invention — its beach,
-marina, plaza, streets, people and story are all original.
+A complete 2D top-down open-world crime game, built for the make.fun
+**gta6-01 "Make GTA 6"** bounty. An original fictional coastal city —
+no Rockstar names, characters, art, music, or map.
 
-## Play it
-
-Serve the `game/` folder with any static server and open
-`game/index.html` in desktop Chrome. No build step, no network request:
+## Play
 
 ```sh
 node serve.ts
-# then open http://localhost:8080
+# open http://localhost:8080
 ```
+
+WASD move / drive · E enter & steal cars · Mouse aim, click shoot ·
+F punch · Space handbrake drift · Shift run · M start mission ·
+R radio · P pause · C save.
 
 ## What is in the game
 
-- **A city to explore** — Solmar Beach, the marina docks, the plaza
-  fountain, five avenues, four streets, traffic and pedestrians.
-- **On foot and by car** — walk, run, steal cars, drive with drift and
-  near-miss cash, wreck cars in chases.
-- **12 story missions over 3 days** — golden hour, sunset and night,
-  with dialogue, objectives, timers, and a MISSION PASSED panel
-  (stars, payout, time, accuracy, cars destroyed, level up).
-- **Combat** — pistol with tracers and muzzle flashes, enemy gunmen,
-  health and armour.
-- **Wanted system** — 5 stars, police cars that chase and ram, a
-  police helicopter at 2+ stars, BUSTED fines.
-- **HUD + minimap** — health, armour, money, level and respect,
-  mission objective, timer, wanted stars, and a live minimap.
-- **Radio** — 4 stations of synthesized WebAudio music (Q to change,
-  M to mute), plus engine, gunshot, crash and pickup sounds.
-- **Save / load** — progress saves to the browser (localStorage);
-  continue from the title screen.
-- **Benny's Garage, pause menu, title screen** — the full loop.
+- **Open city**: beach, marina, downtown, plaza, suburbs; day/night cycle
+  with golden hour and night headlights; pedestrians and dense traffic.
+- **Driving**: arcade car physics, handbrake drift and near-miss cash,
+  car damage, Benny's Garage repairs.
+- **Wanted 0–5 stars**: foot cops at 1 star, patrol cars at 2+,
+  police helicopter with searchlight at 2+, wanted decays when you
+  break line of sight.
+- **Combat**: pistol with tracers and muzzle flash, punching, thugs who
+  return fire, health / armour pickups.
+- **Story**: 12 missions across 3 days — drive-to, chase, shootout,
+  timed delivery, escape — with payouts, respect, levels, and a
+  Mission PASSED screen (stars, time, accuracy, cars destroyed).
+- **HUD**: health / armour, cash, wanted stars, speed, minimap with
+  mission marker and police dots, objective banner, cash popups.
+- **Sound**: fully synthesised WebAudio — engine hum, gunshots, sirens,
+  and a radio with 4 procedural stations. No audio files.
 
-## Controls
+## Layout
 
-| Key | Action |
-| --- | --- |
-| WASD / arrows | Move on foot, drive |
-| Shift | Run |
-| Mouse + click | Aim and shoot |
-| F | Enter / exit car |
-| R | Reload |
-| Q | Next radio station |
-| M | Mute radio |
-| Esc | Pause |
+- `game/src/tuning.js` — every constant
+- `game/src/world.js` — city generation, collision, lighting
+- `game/src/vehicles.js` — car physics, traffic AI, stealing
+- `game/src/actors.js` — player, peds, police, helicopter, combat
+- `game/src/story.js` — 12 missions, progression
+- `game/src/hud.js` — HUD, minimap, menus
+- `game/src/sound.js` — WebAudio synth + radio
+- `game/src/keys.js` — keyboard / mouse input
+- `game/src/boot.js` — startup, main loop, state machine
+- `game/src/core.js` — shared state, camera, save/load
+- `main.ts` — builds `/output` (game + screenshots + dossier.json)
+- `serve.ts` — dev static server (HEAD support, `--host`, logging)
 
 ## Screenshots
 
-1. Golden-hour beach chase — near miss and drift cash, police behind.
-2. Title menu.
-3. Night combat at the plaza.
-4. Mission PASSED — 5 stars, $1,800 payout, 2 cars destroyed, level up.
+`1-beach.jpg` golden-hour beach chase · `2-title.jpg` title menu ·
+`3-combat.jpg` night plaza shootout · `4-passed.jpg` Mission PASSED.
 
-## Tech
-
-Plain JavaScript ES modules under `game/src/`, no libraries, no build
-step. `main.ts` (Node 22, standard library only) copies `game/` and
-`screenshots/` to the output directory and writes `dossier.json` with
-the vendored make.fun library.
-
-## License
-
-MIT — see `LICENSE`.
-
----
-
-Built on [make.fun](https://make.fun) — join with my referral code
-**zeyxtczn**: https://make.fun/r/zeyxtczn
+MIT licensed. Built fresh in one recorded session for gta6-01 round 8.

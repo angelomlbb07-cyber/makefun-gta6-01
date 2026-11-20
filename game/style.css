@@ -1,30 +1,54 @@
-/* SOLMAR page chrome — the game itself is drawn on the canvas. */
+/* style.css — page shell for SOLMAR. One job: present the canvas. */
 * { box-sizing: border-box; }
+
 html, body {
   margin: 0;
   padding: 0;
-  background: #0d0f16;
-  color: #e8e8e8;
-  font-family: Arial, Helvetica, sans-serif;
+  background: #10131c;
+  color: #f5f0e6;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh;
 }
-#wrap {
-  max-width: 1280px;
-  margin: 0 auto;
+
+body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
   padding: 12px;
 }
+
+#stage {
+  width: min(1280px, 100%);
+  border: 3px solid #e8b13c;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+  background: #0a0e18;
+}
+
 #game {
   display: block;
   width: 100%;
   height: auto;
-  background: #1c2b1a;
-  border: 2px solid #2c2c34;
-  border-radius: 6px;
-  outline: none;
   cursor: crosshair;
 }
+
 #help {
-  margin: 10px 4px 0;
+  margin: 0;
   font-size: 14px;
-  color: #9a9aa5;
+  color: #b8b8ae;
   text-align: center;
+}
+
+#fallback {
+  padding: 40px;
+  text-align: center;
+}
+
+#fallback h1 {
+  color: #e8b13c;
+  font-size: 48px;
+  margin: 0 0 8px;
 }

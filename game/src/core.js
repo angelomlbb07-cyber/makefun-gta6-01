@@ -1,196 +1,181 @@
-// SOLMAR core — shared helpers and the single game-state factory.
-// Every other module reads helpers from here; nothing here knows about
-// rendering, missions or sound, so the state stays easy to reason about.
+// core.js — shared game state, orchestration, and the camera.
+// One job: hold the whole game in one object and keep it moving.
+import { TUNING } from './tuning.js';
+import { generateCity, lightingForHour } from './world.js';
+import { makePlayer, spawnPeds } from './actors.js';
+import { makeCar, spawnTraffic } from './vehicles.js';
+import { SoundEngine } from './sound.js';
 
-export const WORLD_W = 3600;
-export const WORLD_H = 2600;
-export const SAVE_KEY = 'solmar-save-v7';
+export const SAVE_KEY = 'solmar-save-v8';
 
-export function clamp(v, a, b) {
-  return v < a ? a : v > b ? b : v;
-}
-
-export function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-export function dist(ax, ay, bx, by) {
-  return Math.hypot(ax - bx, ay - by);
-}
-
-export function angleTo(ax, ay, bx, by) {
-  return Math.atan2(by - ay, bx - ax);
-}
-
-export function angleDiff(a, b) {
-  let d = b - a;
-  while (d > Math.PI) d -= Math.PI * 2;
-  while (d < -Math.PI) d += Math.PI * 2;
-  return d;
-}
-
-// Deterministic RNG so staged screenshots and replays look identical.
-export function mulberry32(seed) {
-  let s = seed >>> 0;
-  return function () {
-    s |= 0;
-    s = (s + 0x6d2b79f5) | 0;
-    let t = Math.imul(s ^ (s >>> 15), 1 | s);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-export function pick(rng, arr) {
-  return arr[Math.floor(rng() * arr.length)];
-}
-
-// Push a circle entity out of an axis-aligned rectangle. Returns true on hit.
-export function pushOutOfRect(e, r) {
-  const nx = clamp(e.x, r.x, r.x + r.w);
-  const ny = clamp(e.y, r.y, r.y + r.h);
-  const dx = e.x - nx;
-  const dy = e.y - ny;
-  const d2 = dx * dx + dy * dy;
-  const rad = e.r || 14;
-  if (d2 >= rad * rad) return false;
-  if (d2 > 0.0001) {
-    const d = Math.sqrt(d2);
-    e.x = nx + (dx / d) * rad;
-    e.y = ny + (dy / d) * rad;
-  } else {
-    // Centre inside the rect: push out along the smallest penetration.
-    const left = e.x - r.x;
-    const right = r.x + r.w - e.x;
-    const top = e.y - r.y;
-    const bottom = r.y + r.h - e.y;
-    const m = Math.min(left, right, top, bottom);
-    if (m === left) e.x = r.x - rad;
-    else if (m === right) e.x = r.x + r.w + rad;
-    else if (m === top) e.y = r.y - rad;
-    else e.y = r.y + r.h + rad;
-  }
-  return true;
-}
-
-export function circleHitsRect(x, y, r, rect) {
-  const nx = clamp(x, rect.x, rect.x + rect.w);
-  const ny = clamp(y, rect.y, rect.y + rect.h);
-  const dx = x - nx;
-  const dy = y - ny;
-  return dx * dx + dy * dy < r * r;
-}
-
-export function fmtTime(sec) {
-  const s = Math.max(0, Math.floor(sec));
-  const m = Math.floor(s / 60);
-  return String(m).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-}
-
-export function money(n) {
-  return '$' + Math.round(n).toLocaleString('en-US');
-}
-
-// The one and only game state object. boot.js creates it; every system
-// reads and writes fields on it, so save/load is a plain JSON snapshot.
-export function createState() {
-  return {
-    mode: 'title', // title | brief | play | paused | passed | failed | over | busted
-    frozen: false, // staging: render but do not simulate
-    time: 0,
-    day: 1,
-    mood: 'golden', // golden | day | sunset | night
-    money: 250,
-    respect: 0,
-    level: 1,
-    health: 100,
-    armour: 0,
-    wanted: 0,
-    wantedHeat: 0, // 0..100, drives star changes
-    ammo: 24,
-    reserveAmmo: 120,
-    player: {
-      x: 1800, y: 1150, angle: -Math.PI / 2, speed: 0,
-      onFoot: true, car: null, r: 14, moving: false,
-      aim: 0, fireCd: 0, reloadT: 0, hurtT: 0,
-    },
+export function createGame() {
+  const world = generateCity();
+  const start = world.landmarks.beachStart;
+  const player = makePlayer(start.x, start.y);
+  const state = {
+    world,
+    player,
+    playerCar: null,
     cars: [],
     peds: [],
-    foes: [],
     cops: [],
+    thugs: [],
     heli: null,
     bullets: [],
-    parts: [],
-    floats: [],
-    pickups: [],
-    missionIdx: 0,
+    tracers: [],
+    particles: [],
+    popups: [],
+    pickups: [
+      { kind: 'health', x: start.x + 60, y: start.y - 40, taken: false },
+      { kind: 'armour', x: world.landmarks.plaza.x - 80, y: world.landmarks.plaza.y + 60, taken: false },
+      { kind: 'health', x: world.landmarks.garage.x - 60, y: world.landmarks.garage.y - 60, taken: false },
+    ],
+    camera: { x: start.x - TUNING.viewWidth / 2, y: start.y - TUNING.viewHeight / 2 },
+    time: 0,
+    clockHours: TUNING.startClockHours,
+    day: 1,
+    cash: TUNING.startCash,
+    respect: 0,
+    level: 1,
+    wanted: 0,
+    wantedWhole: 0,
+    lastSeenT: -100,
+    wantedDecayT: 0,
     mission: null,
-    missionTime: 0,
-    missionLeft: 0,
-    shotsFired: 0,
-    shotsHit: 0,
-    carsDestroyed: 0,
-    kills: 0,
-    camera: { x: 1800, y: 1150 },
-    keys: {},
-    mouse: { x: 640, y: 400, down: false, wx: 0, wy: 0 },
-    radio: 0,
-    radioOn: true,
-    notice: '',
-    noticeT: 0,
-    passed: null,
-    failReason: '',
-    bustedT: 0,
-    stats: { earned: 0, missionsDone: 0 },
+    missionIndex: 0,
+    completed: [],
+    lastResult: null,
+    screen: 'title',        // title | play | pause | passed | failed
     hasSave: false,
+    playerDead: false,
+    driftCash: 0,
+    nearMissCooldown: 0,
+    mouse: { x: 0, y: 0, down: false, worldX: 0, worldY: 0 },
+    message: '',
+    messageT: 0,
+    muzzle: null,
+    headlights: false,
+    radioLabel: '',
+    radioLabelT: 0,
+    stats: { shots: 0, hits: 0, punches: 0, thugsDown: 0, copsDown: 0, carsDestroyed: 0, carsDamaged: 0, nearMissCash: 0 },
+    sound: null,
+    shot: 0,
+    shotApplied: false,
   };
+  // A starter car parked ON the beach road (road centre x=480) so the first
+  // mission is instant and the car never spawns inside a building.
+  const starter = makeCar(start.x, start.y + 80, Math.PI / 2, 2, false);
+  state.cars.push(starter);
+  state.cars.push(...spawnTraffic(world, TUNING.trafficCount, start.x, start.y));
+  state.peds.push(...spawnPeds(world, TUNING.pedCount, start.x, start.y));
+  state.sound = new SoundEngine();
+  return state;
 }
 
-export function saveGame(G) {
+// Camera follows the player (or their car), clamped to the world.
+export function updateCamera(state, dt) {
+  const focus = state.playerCar && !state.player.onFoot ? state.playerCar : state.player;
+  const tx = focus.x - TUNING.viewWidth / 2;
+  const ty = focus.y - TUNING.viewHeight / 2;
+  const k = Math.min(1, TUNING.cameraLerp * dt);
+  state.camera.x += (tx - state.camera.x) * k;
+  state.camera.y += (ty - state.camera.y) * k;
+  state.camera.x = Math.max(0, Math.min(TUNING.worldWidth - TUNING.viewWidth, state.camera.x));
+  state.camera.y = Math.max(0, Math.min(TUNING.worldHeight - TUNING.viewHeight, state.camera.y));
+}
+
+// Advance the clock; returns the lighting for this frame.
+export function updateClock(state, dt) {
+  state.clockHours += (dt / TUNING.dayLengthSeconds) * 24;
+  if (state.clockHours >= 24) state.clockHours -= 24;
+  return lightingForHour(state.clockHours);
+}
+
+// Age particles, tracers, popups, and the toast message.
+export function updateEffects(state, dt) {
+  for (const pt of state.particles) {
+    pt.x += pt.vx * dt;
+    pt.y += pt.vy * dt;
+    pt.vx *= 0.98; pt.vy *= 0.98;
+    pt.life -= dt;
+  }
+  state.particles = state.particles.filter((pt) => pt.life > 0);
+  for (const tr of state.tracers) tr.life -= dt;
+  state.tracers = state.tracers.filter((tr) => tr.life > 0);
+  for (const pop of state.popups) pop.life -= dt;
+  state.popups = state.popups.filter((pop) => pop.life > 0);
+  if (state.muzzle) {
+    state.muzzle.life -= dt;
+    if (state.muzzle.life <= 0) state.muzzle = null;
+  }
+  state.messageT = Math.max(0, state.messageT - dt);
+  state.radioLabelT = Math.max(0, state.radioLabelT - dt);
+}
+
+export function showMessage(state, text, seconds = 4) {
+  state.message = text;
+  state.messageT = seconds;
+}
+
+// --- Save / load ----------------------------------------------------------
+// localStorage only; nothing leaves the machine.
+export function saveGame(state) {
   try {
-    const snap = {
-      money: G.money, respect: G.respect, level: G.level,
-      missionIdx: G.missionIdx, day: G.day,
-      health: G.health, armour: G.armour,
-      px: G.player.x, py: G.player.y,
-      stats: G.stats, savedAt: Date.now(),
+    const data = {
+      cash: state.cash, respect: state.respect, level: state.level,
+      day: state.day, missionIndex: state.missionIndex,
+      completed: state.completed,
+      px: state.player.x, py: state.player.y,
+      health: state.player.health, armour: state.player.armour, ammo: state.player.ammo,
     };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(snap));
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    state.hasSave = true;
+    showMessage(state, 'Game saved.', 2.5);
     return true;
   } catch (err) {
     return false;
   }
 }
 
-export function loadSave() {
+export function loadSave(state) {
   try {
     const raw = localStorage.getItem(SAVE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
+    if (!raw) return false;
+    const data = JSON.parse(raw);
+    state.cash = data.cash ?? TUNING.startCash;
+    state.respect = data.respect ?? 0;
+    state.level = data.level ?? 1;
+    state.day = data.day ?? 1;
+    state.missionIndex = data.missionIndex ?? 0;
+    state.completed = data.completed ?? [];
+    state.player.x = data.px ?? state.player.x;
+    state.player.y = data.py ?? state.player.y;
+    state.player.health = data.health ?? 100;
+    state.player.armour = data.armour ?? 0;
+    state.player.ammo = data.ammo ?? TUNING.pistolAmmoStart;
+    state.hasSave = true;
+    return true;
   } catch (err) {
-    return null;
+    return false;
   }
 }
 
-export function clearSave() {
+export function hasSave() {
   try {
-    localStorage.removeItem(SAVE_KEY);
+    return !!localStorage.getItem(SAVE_KEY);
   } catch (err) {
-    /* storage unavailable */
+    return false;
   }
 }
 
-export function applySave(G, snap) {
-  if (!snap) return;
-  G.money = snap.money ?? 250;
-  G.respect = snap.respect ?? 0;
-  G.level = snap.level ?? 1;
-  G.missionIdx = snap.missionIdx ?? 0;
-  G.day = snap.day ?? 1;
-  G.health = snap.health ?? 100;
-  G.armour = snap.armour ?? 0;
-  G.player.x = snap.px ?? 1800;
-  G.player.y = snap.py ?? 1150;
-  G.stats = snap.stats ?? { earned: 0, missionsDone: 0 };
-  G.hasSave = true;
+// Expose a tiny debug handle so the headless play-test can assert progress.
+export function debugSnapshot(state) {
+  return {
+    screen: state.screen,
+    px: Math.round(state.player.x), py: Math.round(state.player.y),
+    cash: state.cash, wanted: state.wantedWhole,
+    mission: state.mission ? state.mission.def.title : null,
+    cars: state.cars.length, peds: state.peds.length,
+    health: Math.round(state.player.health),
+  };
 }
