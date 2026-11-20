@@ -24,19 +24,24 @@ export function makeCar(x, y, angle, modelIndex, traffic = false) {
   };
 }
 
-// Spawn a parked / traffic car on a road near (x, y).
+// Spawn a parked / traffic car on a road near (x, y), but never right on
+// top of the spawn point — a traffic jam at the player's feet pins the
+// starter car and the first mission with it.
 export function spawnTrafficCar(world, rng, nearX, nearY) {
   const roadsV = world.roadsV, roadsH = world.roadsH;
-  const vertical = rng() < 0.5;
   let x, y, angle;
-  if (vertical) {
-    x = roadsV[Math.floor(rng() * roadsV.length)];
-    y = nearY + (rng() - 0.5) * 900;
-    angle = rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
-  } else {
-    x = nearX + (rng() - 0.5) * 900;
-    y = roadsH[Math.floor(rng() * roadsH.length)];
-    angle = rng() < 0.5 ? 0 : Math.PI;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const vertical = rng() < 0.5;
+    if (vertical) {
+      x = roadsV[Math.floor(rng() * roadsV.length)];
+      y = nearY + (rng() - 0.5) * 900;
+      angle = rng() < 0.5 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      x = nearX + (rng() - 0.5) * 900;
+      y = roadsH[Math.floor(rng() * roadsH.length)];
+      angle = rng() < 0.5 ? 0 : Math.PI;
+    }
+    if (Math.hypot(x - nearX, y - nearY) > 350) break;
   }
   x = Math.max(200, Math.min(TUNING.worldWidth - 100, x));
   y = Math.max(100, Math.min(TUNING.worldHeight - 100, y));
@@ -188,7 +193,11 @@ export function resolveCarCollisions(cars, state) {
             state.stats.carsDamaged += 1;
           }
         }
-        const tmp = a.speed; a.speed = b.speed * 0.4; b.speed = tmp * 0.4;
+        // Only trade speed on a real hit: a stopped car must not zero the
+        // player's speed every frame and pin them in a traffic jam.
+        if (impact > 60) {
+          const tmp = a.speed; a.speed = b.speed * 0.4; b.speed = tmp * 0.4;
+        }
       }
     }
   }
